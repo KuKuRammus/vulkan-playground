@@ -1,6 +1,7 @@
 # IDEs
 .idea
 .vscode
+*.cbp
 
 # CMake
 CMakeLists.txt.user
