@@ -32,6 +32,8 @@ VkLayerProperties *vulkanLayers;
 VkInstance vulkanInstance;
 u32 vulkanPhysicalDeviceRating = 0;
 VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
+VkDevice vulkanDevice;
+VkQueue vulkanGraphicsQueue;
 
 // Vulkan queue families
 struct VulkanQueueFamilyIndices {
@@ -67,6 +69,42 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
     free(queueFamilies);
 
     return indices;
+}
+
+void createVulkanLogicalDevice() {
+    printf("Creating vulkan logical device\n");
+    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
+
+    // Create required queues (already checked for availability)
+    VkDeviceQueueCreateInfo queueCreateInfo = {};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.queueFamilyIndex = indices.graphics;
+    queueCreateInfo.queueCount = 1;
+
+    // Declare queue priority
+    f32 queuePriority = 1.0f;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    // Declare required device features (already checked for availability)
+    // Empty for now
+    VkPhysicalDeviceFeatures deviceFeatures = {};
+
+    // Create logical device
+    VkDeviceCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pEnabledFeatures = &deviceFeatures;
+    // TODO: Research about virtual device layers/extensions (is it deprecated?)
+
+    if (
+        vkCreateDevice(vulkanPhysicalDevice, &createInfo, NULL, &vulkanDevice) != VK_SUCCESS
+    ) {
+        printf("[ERR] Failed to create vulkan virtual device");
+    }
+
+    // Get handle for graphics queue
+    vkGetDeviceQueue(vulkanDevice, indices.graphics, 0, &vulkanGraphicsQueue);
 }
 
 u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
@@ -256,10 +294,14 @@ void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
     pickVulkanPhysicalDevice();
+    createVulkanLogicalDevice();
 }
 
 void shutdownVulkan() {
     printf("Shutting down Vulkan\n");
+    vkDestroyDevice(vulkanDevice, NULL);
+    
+    printg("Destroying Vulkan virtual device\n");
     vkDestroyInstance(vulkanInstance, NULL);
 
     if (debugModeEnabled) {
