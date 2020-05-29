@@ -30,20 +30,117 @@ GLFWwindow *window;
 // Vulkan info
 VkLayerProperties *vulkanLayers;
 VkInstance vulkanInstance;
+u32 vulkanPhysicalDeviceRating = 0;
+VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
+
+// Vulkan queue families
+struct VulkanQueueFamilyIndices {
+    b32 isGraphicsSet;
+    u32 graphics;
+};
 
 // Required validation layers
-
+const char *requiredVulkanLayers[1] = { "VK_LAYER_KHRONOS_validation" };
 
 // ------ END GLOBALS
 
+struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device) {
+    printf("Checking for required queue families\n");
+
+    struct VulkanQueueFamilyIndices indices;
+
+    u32 queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
+
+    VkQueueFamilyProperties* queueFamilies = (VkQueueFamilyProperties *)malloc(
+        queueFamilyCount * sizeof(VkQueueFamilyProperties)
+    );
+
+    for (u32 i = 0; i < queueFamilyCount; i++) {
+        if (queueFamilies[i].queueFlags && VK_QUEUE_GRAPHICS_BIT) {
+            // Graphics queue is supported
+            indices.isGraphicsSet = QQ_TRUE;
+            indices.graphics = i;
+        }
+    }
+
+    free(queueFamilies);
+
+    return indices;
+}
+
+u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
+    // 0 - Not usable device
+    u32 score = 0;
+
+    // Get features and properties
+    VkPhysicalDeviceProperties deviceProperties;
+    VkPhysicalDeviceFeatures deviceFeatures;
+    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+    // All devices should support geometry shader
+    if (!deviceFeatures.geometryShader) {
+        return 0;
+    }
+
+    // Check queue families
+    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(device);
+    if (indices.isGraphicsSet != QQ_TRUE) {
+        // Device must support graphics queue
+        return 0;
+    }
+
+    // Prefer discrete GPUs
+    if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        score += 1000;
+    }
+
+    // Bigger supported size of textures is better
+    score += deviceProperties.limits.maxImageDimension2D;
+
+    printf("Device %s | score: %d\n", deviceProperties.deviceName, score);
+
+    return score;
+}
+
+void pickVulkanPhysicalDevice() {
+    printf("Picking vulkan physical device\n");
+
+    u32 deviceCount = 0;
+    vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, NULL);
+
+    if (deviceCount == 0) {
+        printf(" [ERR] Failed to find GPUs with Vulkan support\n");
+    }
+
+    VkPhysicalDevice* devices = (VkPhysicalDevice *)malloc(
+        deviceCount * sizeof(VkPhysicalDevice)
+    );
+    vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, devices);
+
+    for (u32 i = 0; i < deviceCount; i++) {
+        u32 score = rateVulkanPhysicalDevice(devices[i]);
+        if (score == 0) {
+            continue;
+        }
+
+        if (score > vulkanPhysicalDeviceRating) {
+            vulkanPhysicalDevice = devices[i];
+            vulkanPhysicalDeviceRating = score;
+        }
+   }
+
+    if (vulkanPhysicalDevice == VK_NULL_HANDLE) {
+        printf(" [ERR] All devices are failed to meet requirements\n");
+    }
+
+    // Free previously allocated memory
+    free(devices);
+}
+
 b32 checkVulkanValidationLayerSupport() {
     printf("Checking if required Vulkan layers are present\n");
-
-    // Declare required validation layers
-    // TODO: Hard coded array size. Fix required
-    const char *requiredLayers[1] = {
-            "VK_LAYER_KHRONOS_validation"
-    };
 
     u32 availableLayerCount;
     vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
@@ -58,14 +155,14 @@ b32 checkVulkanValidationLayerSupport() {
         b32 layerIsFound = QQ_FALSE;
 
         for (u32 j = 0; j < availableLayerCount; j++) {
-            if (strcmp(requiredLayers[i], vulkanLayers[j].layerName) == 0) {
+            if (strcmp(requiredVulkanLayers[i], vulkanLayers[j].layerName) == 0) {
                 layerIsFound = QQ_TRUE;
                 break;
             }
         }
 
         if (layerIsFound == QQ_FALSE) {
-            printf("Layer %s was required, but wasn't found\n", requiredLayers[i]);
+            printf("Layer %s was required, but wasn't found\n", requiredVulkanLayers[i]);
             allLayersIsFound = QQ_FALSE;
         }
     }
@@ -87,16 +184,16 @@ void displaySupportedVulkanExtensions() {
 
     // Allocate memory for list of available extensions
     VkExtensionProperties *availableExtensions = (VkExtensionProperties *) malloc(
-            extensionCount * sizeof(VkExtensionProperties)
+        extensionCount * sizeof(VkExtensionProperties)
     );
     vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, availableExtensions);
 
     // List available extensions
     for (u32 i = 0; i < extensionCount; i++) {
         printf(
-                " - %s (spec: %d)\n",
-                availableExtensions[i].extensionName,
-                availableExtensions[i].specVersion
+            " - %s (spec: %d)\n",
+            availableExtensions[i].extensionName,
+            availableExtensions[i].specVersion
         );
     }
 
@@ -140,10 +237,8 @@ void createVulkanInstance() {
 
     // Describe required validation layers
     if (debugModeEnabled) {
-        createInfo.enabledLayerCount = 0;
-
-//        createInfo.enabledLayerCount = sizeof(vulkanLayers) / sizeof(vulkanLayers[0]);
-//        createInfo.ppEnabledLayerNames = vulkanLayers;
+        createInfo.enabledLayerCount = 1;
+        createInfo.ppEnabledLayerNames = requiredVulkanLayers;
     } else {
         createInfo.enabledLayerCount = 0;
     }
@@ -160,6 +255,7 @@ void createVulkanInstance() {
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
+    pickVulkanPhysicalDevice();
 }
 
 void shutdownVulkan() {
@@ -184,11 +280,11 @@ int main(int argc, const char **argv) {
 
     // Create GLFW window
     window = glfwCreateWindow(
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
-            "qq",
-            NULL,
-            NULL
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        "qq",
+        NULL,
+        NULL
     );
 
     // Init vulkan
