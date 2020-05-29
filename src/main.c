@@ -301,7 +301,7 @@ void shutdownVulkan() {
     printf("Shutting down Vulkan\n");
     vkDestroyDevice(vulkanDevice, NULL);
     
-    printg("Destroying Vulkan virtual device\n");
+    printf("Destroying Vulkan virtual device\n");
     vkDestroyInstance(vulkanInstance, NULL);
 
     if (debugModeEnabled) {
