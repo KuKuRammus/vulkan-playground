@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 // Signed integers
+#define U32_MAX UINT32_MAX
 typedef int8_t i8;
 typedef int16_t i16;
 typedef int32_t i32;

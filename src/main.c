@@ -21,6 +21,18 @@ const b32 debugModeEnabled = QQ_TRUE;
 const b32 debugModeEnabled = QQ_FALSE;
 #endif
 
+#ifndef NOMINMAX
+
+#ifndef max
+#define max(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef min
+#define min(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
+#endif
+
 // GLOBALS
 // TODO: Put into structure
 
@@ -33,12 +45,23 @@ VkInstance vulkanInstance;
 u32 vulkanPhysicalDeviceRating = 0;
 VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
 VkDevice vulkanDevice;
+VkSwapchainKHR vulkanSwapChain;
 VkQueue vulkanGraphicsQueue;
 VkQueue vulkanPresentQueue;
 
 // Rendering surface
 VkSurfaceKHR vulkanSurface;
 
+// Vulkan swap chain properties
+struct VulkanSwapChainSupportDetails {
+    VkSurfaceCapabilitiesKHR capabilities;
+    
+    u32 formatCount; 
+    VkSurfaceFormatKHR* formats;
+    
+    u32 presentModeCount;
+    VkPresentModeKHR* presentModes;
+};
 
 // Vulkan queue families
 struct VulkanQueueFamilyIndices {
@@ -54,7 +77,112 @@ struct VulkanQueueFamilyIndices {
 // Required validation layers
 const char *requiredVulkanLayers[1] = { "VK_LAYER_KHRONOS_validation" };
 
+// Reuired device extensions
+u32 requiredVulkanDeviceExtensionCount = 1;
+const char *reqVulkanDeviceExtensions[1] = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+};
+
 // ------ END GLOBALS
+
+// Fetches best suface format
+VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHR* formats, u32 count) {
+    for (u32 i = 0; i < count; i++) {
+        if (
+            formats[i].format == VK_FORMAT_B8G8R8A8_SRGB
+            && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+        ) {
+            // TODO: Segfault alert
+            return formats[i];
+        }
+    }
+    // TODO: Check if count != 0
+    return formats[0];
+}
+
+// Determines presentation mode
+VkPresentModeKHR chooseSwapPresentMode(VkPresentModeKHR* modes, u32 count) {
+    for (u32 i = 0; i < count; i++) {
+        if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+            // Preferred display mode
+            return VK_PRESENT_MODE_MAILBOX_KHR;
+        }
+    }
+
+    // This mode should be always available
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+// Determines resolution of swap chain images
+VkExtent2D chooseSwapExtent(VkSurfaceCapabilitiesKHR capabilities) {
+    if (capabilities.currentExtent.width != U32_MAX) {
+        return capabilities.currentExtent;
+    } else {
+        VkExtent2D actualExtent = {WINDOW_WIDTH, WINDOW_HEIGHT};
+        actualExtent.width = max(
+            capabilities.minImageExtent.width,
+            min(
+                capabilities.maxImageExtent.width,
+                actualExtent.width
+            )
+        );
+        actualExtent.height = max(
+            capabilities.minImageExtent.height,
+            min(
+                capabilities.maxImageExtent.height,
+                actualExtent.height
+            )
+        );
+        return actualExtent;
+    }
+}
+
+struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
+    struct VulkanSwapChainSupportDetails details;
+    details.formatCount = 0;
+    details.presentModeCount = 0;
+
+    // Fetch capabilities
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, vulkanSurface, &details.capabilities);
+
+    // Fetch format count
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, vulkanSurface, &details.formatCount, NULL);
+    if (details.formatCount != 0) {
+        details.formats = (VkSurfaceFormatKHR*)malloc(
+            details.formatCount * sizeof(VkSurfaceFormatKHR)
+        );
+        vkGetPhysicalDeviceSurfaceFormatsKHR(
+            device,
+            vulkanSurface,
+            &details.formatCount,
+            details.formats
+        );
+    }
+
+    // Fetch present modes
+    vkGetPhysicalDeviceSurfacePresentModesKHR(
+        device,
+        vulkanSurface,
+        &details.presentModeCount,
+        NULL
+    );
+    if (details.presentModeCount != 0) {
+        details.presentModes = (VkPresentModeKHR*)malloc(
+            details.presentModeCount * sizeof(VkPresentModeKHR)
+        );
+        vkGetPhysicalDeviceSurfacePresentModesKHR(
+            device,
+            vulkanSurface,
+            &details.presentModeCount,
+            details.presentModes
+        );
+    }
+
+    // TODO: MEMORY LEAK WARNING!!!!
+    // formats and presentModes should be cleared after allocation
+
+    return details;
+}
 
 struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device) {
     printf("Checking for required queue families\n");
@@ -104,6 +232,108 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
     return indices;
 }
 
+void createSwapChain() {
+    printf("Creating swapchain\n");
+
+    struct VulkanSwapChainSupportDetails swapChainSupport = querySwapChainSupport(
+        vulkanPhysicalDevice
+    );
+
+    // Determine properties
+    VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(
+            swapChainSupport.formats,
+            swapChainSupport.formatCount
+    );
+    VkPresentModeKHR presentMode = chooseSwapPresentMode(
+        swapChainSupport.presentModes,
+        swapChainSupport.presentModeCount
+    );
+    VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+    // Request minimum allowed images in swap chain + 1
+    u32 imageCount = swapChainSupport.capabilities.minImageCount + 1;
+    if (
+        swapChainSupport.capabilities.maxImageCount > 0
+        && imageCount > swapChainSupport.capabilities.maxImageCount
+    ) {
+        // Cap to max, if nessesary
+        imageCount = swapChainSupport.capabilities.maxImageCount;
+    }
+
+    // Actually create swap chain
+    VkSwapchainCreateInfoKHR createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = vulkanSurface;
+    createInfo.minImageCount = imageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = extent;
+    
+    // Amount of image layers each image consist of
+    // Always one, unless developing stereoscopic rendering
+    createInfo.imageArrayLayers = 1;
+
+    // Define operation types on images
+    // In this case, render directly to them
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    // Determine how to handle swap chain images
+    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
+    u32 queueFamilyIndices[2] = {
+        indices.graphics,
+        indices.present
+    };
+    if (indices.graphics != indices.present) {
+        // Multiple queues present, allow concurrent processing
+        // (can be used in multiple queues, without ownership transfer)
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+
+        // Declare queues, which will share resources
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+    } else {
+        // Only 1 queue present, make working with images exclusive
+        // (must be transferred before usage in another queue)
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.queueFamilyIndexCount = 0;
+        createInfo.pQueueFamilyIndices = NULL;
+    }
+
+    // Specify additional image ransformation
+    createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+
+    // Declare alpha channel, which should be used for blending with other windows
+    // Ignore alpha in this case
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+    // Specify present mode
+    // Don't case about pixels obscured by another window
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = VK_TRUE;
+
+    // Specify previous swap chain (in case of recreation)
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+    
+    // Create swapchain
+    if (
+        vkCreateSwapchainKHR(vulkanDevice, &createInfo, NULL, &vulkanSwapChain) != VK_SUCCESS
+    ) {
+        printf("[ERR] Failed to create vulkan swapchain");
+    }
+
+
+    // Free resources
+    if (swapChainSupport.formatCount != 0) {
+        free(swapChainSupport.formats);
+    }
+
+    if (swapChainSupport.presentModeCount != 0) {
+        free(swapChainSupport.presentModes);
+    }
+}
+
+
 void createVulkanLogicalDevice() {
     printf("Creating vulkan logical device\n");
     struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
@@ -118,7 +348,6 @@ void createVulkanLogicalDevice() {
     // Priority for all queues
     f32 queuePriority = 1.0f;
     for (u32 i = 0; i < queueCount; i++) {
-        printf("%d", queues[i]);
         VkDeviceQueueCreateInfo queueCreateInfo = {};
         queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         queueCreateInfo.queueFamilyIndex = queues[i];
@@ -138,6 +367,8 @@ void createVulkanLogicalDevice() {
     createInfo.queueCreateInfoCount = queueCount;
     createInfo.pEnabledFeatures = &deviceFeatures;
     // TODO: Research about virtual device layers/extensions (is it deprecated?)
+    createInfo.enabledExtensionCount = requiredVulkanDeviceExtensionCount;
+    createInfo.ppEnabledExtensionNames = reqVulkanDeviceExtensions;
 
     if (
         vkCreateDevice(vulkanPhysicalDevice, &createInfo, NULL, &vulkanDevice) != VK_SUCCESS
@@ -151,6 +382,41 @@ void createVulkanLogicalDevice() {
 
     // Free queue infos
     free(queueCreateInfos);
+}
+
+b32 checkDeviceExtensionSupport(VkPhysicalDevice device) {
+    u32 extensionCount;
+    vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, NULL);
+
+    VkExtensionProperties* availableExtensions = (VkExtensionProperties*)malloc(
+        extensionCount * sizeof(VkExtensionProperties)
+    );
+    vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, availableExtensions);
+
+    b32 allExtensionsFound = QQ_TRUE;
+    for (u32 i = 0; i < requiredVulkanDeviceExtensionCount; i++) {
+        b32 isFound = QQ_FALSE;
+        for (u32 j = 0; j < extensionCount; j++) {
+            if (strcmp(reqVulkanDeviceExtensions[i], availableExtensions[j].extensionName)) {
+                isFound = QQ_TRUE;
+                break;
+            }
+        }
+
+        if (isFound == QQ_FALSE) {
+            printf("Extension %s wasn't found\n", reqVulkanDeviceExtensions[i]);
+            allExtensionsFound = QQ_FALSE;
+        }
+    }
+
+    if (allExtensionsFound == QQ_TRUE) {
+        printf(" - All required extensions are present\n");
+    }
+
+    free(availableExtensions);
+
+    return (allExtensionsFound == QQ_TRUE);
+
 }
 
 u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
@@ -176,6 +442,27 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
     }
     if (indices.isPresentSet != QQ_TRUE) {
         // Device must support presentation queue
+        return 0;
+    }
+
+    b32 extensionsSupported = checkDeviceExtensionSupport(device);
+    if (extensionsSupported == QQ_FALSE) {
+        // Device should support all required extensions
+        return 0;
+    }
+
+    struct VulkanSwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+    b32 swapChainWorkingCorrectly = (
+        swapChainSupport.formatCount != 0
+        && swapChainSupport.presentModeCount != 0
+    );
+    if (swapChainSupport.formatCount != 0) {
+        free(swapChainSupport.formats);
+    }
+    if (swapChainSupport.presentModeCount != 0) {
+        free(swapChainSupport.presentModes);
+    }
+    if (swapChainWorkingCorrectly == QQ_FALSE) {
         return 0;
     }
 
@@ -259,7 +546,7 @@ b32 checkVulkanValidationLayerSupport() {
         printf(" - All required layers are present\n");
     }
 
-    return (allLayersIsFound == QQ_FALSE);
+    return (allLayersIsFound == QQ_TRUE);
 }
 
 void displaySupportedVulkanExtensions() {
@@ -319,9 +606,13 @@ void createVulkanInstance() {
     // For now, just fetch all extensions, required by GLFW
     u32 glfwExtensionCount = 0;
     const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
     createInfo.enabledExtensionCount = glfwExtensionCount;
     createInfo.ppEnabledExtensionNames = glfwExtensions;
+    
+    // TODO: These lines are causing segfault
+    //       But it is correct declaration (Probably GLFW messes it up)
+    // createInfo.enabledExtensionCount = requiredVulkanDeviceExtensionCount;
+    // createInfo.ppEnabledExtensionNames = reqVulkanDeviceExtensions;
 
     // Describe required validation layers
     if (debugModeEnabled) {
@@ -345,6 +636,7 @@ void createWindowSurface() {
     }
 }
 
+
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
@@ -352,9 +644,13 @@ void initVulkan() {
     createWindowSurface();
     pickVulkanPhysicalDevice();
     createVulkanLogicalDevice();
+    createSwapChain();
 }
 
 void shutdownVulkan() {
+    printf("Shutting down swapchain\n");
+    vkDestroySwapchainKHR(vulkanDevice, vulkanSwapChain, NULL);
+
     printf("Shutting down Vulkan\n");
     vkDestroyDevice(vulkanDevice, NULL);
 
