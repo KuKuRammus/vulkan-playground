@@ -45,7 +45,13 @@ VkInstance vulkanInstance;
 u32 vulkanPhysicalDeviceRating = 0;
 VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
 VkDevice vulkanDevice;
+
+// Vulkan swap chain related stuff
 VkSwapchainKHR vulkanSwapChain;
+u32 vulkanSwapChainImageCount = 0;
+VkFormat vulkanSwapChainImageFormat;
+VkExtent2D vulkanSwapChainExtent;
+VkImage* vulkanSwapChainImages;
 VkQueue vulkanGraphicsQueue;
 VkQueue vulkanPresentQueue;
 
@@ -322,6 +328,30 @@ void createSwapChain() {
         printf("[ERR] Failed to create vulkan swapchain");
     }
 
+    // Get swap chain images
+    vkGetSwapchainImagesKHR(
+        vulkanDevice,
+        vulkanSwapChain,
+        &vulkanSwapChainImageCount,
+        NULL
+    );
+
+    // Allocate memory to store images
+    vulkanSwapChainImages = (VkImage*)malloc(
+        vulkanSwapChainImageCount * sizeof(VkImage)
+    );
+
+    // Store images
+    vkGetSwapchainImagesKHR(
+        vulkanDevice,
+        vulkanSwapChain,
+        &vulkanSwapChainImageCount,
+        vulkanSwapChainImages
+    );
+
+    // Save format and extent
+    vulkanSwapChainImageFormat = surfaceFormat.format;
+    vulkanSwapChainExtent = extent;
 
     // Free resources
     if (swapChainSupport.formatCount != 0) {
@@ -648,6 +678,9 @@ void initVulkan() {
 }
 
 void shutdownVulkan() {
+    printf("Releasing swapchain images info");
+    free(vulkanSwapChainImages);
+
     printf("Shutting down swapchain\n");
     vkDestroySwapchainKHR(vulkanDevice, vulkanSwapChain, NULL);
 
