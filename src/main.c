@@ -34,11 +34,21 @@ u32 vulkanPhysicalDeviceRating = 0;
 VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
 VkDevice vulkanDevice;
 VkQueue vulkanGraphicsQueue;
+VkQueue vulkanPresentQueue;
+
+// Rendering surface
+VkSurfaceKHR vulkanSurface;
+
 
 // Vulkan queue families
 struct VulkanQueueFamilyIndices {
+    // Graphics
     b32 isGraphicsSet;
     u32 graphics;
+
+    // Presentation
+    b32 isPresentSet;
+    u32 present;
 };
 
 // Required validation layers
@@ -50,6 +60,8 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
     printf("Checking for required queue families\n");
 
     struct VulkanQueueFamilyIndices indices;
+    indices.isGraphicsSet = QQ_FALSE;
+    indices.isPresentSet = QQ_FALSE;
 
     u32 queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
@@ -59,12 +71,33 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
     );
 
     for (u32 i = 0; i < queueFamilyCount; i++) {
-        if (queueFamilies[i].queueFlags && VK_QUEUE_GRAPHICS_BIT) {
+        if (
+            indices.isGraphicsSet == QQ_FALSE
+            && queueFamilies[i].queueFlags
+            && VK_QUEUE_GRAPHICS_BIT
+        ) {
             // Graphics queue is supported
             indices.isGraphicsSet = QQ_TRUE;
             indices.graphics = i;
+            continue;
+        }
+
+        VkBool32 presentSupport = QQ_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vulkanSurface, &presentSupport);
+        if (indices.isPresentSet == QQ_FALSE && presentSupport != QQ_FALSE) {
+            indices.present = i;
+            indices.isPresentSet = QQ_TRUE;
+            continue;
+        }
+
+        if (
+            indices.isGraphicsSet == QQ_TRUE
+            && indices.isPresentSet == QQ_TRUE
+        ) {
+            break;
         }
     }
+
 
     free(queueFamilies);
 
@@ -75,15 +108,24 @@ void createVulkanLogicalDevice() {
     printf("Creating vulkan logical device\n");
     struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
 
-    // Create required queues (already checked for availability)
-    VkDeviceQueueCreateInfo queueCreateInfo = {};
-    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = indices.graphics;
-    queueCreateInfo.queueCount = 1;
+    // Create list of queue create infos
+    u32 queueCount = 2;
+    u32 queues[2] = { indices.graphics, indices.present };
+    VkDeviceQueueCreateInfo* queueCreateInfos = (VkDeviceQueueCreateInfo*)malloc(
+        queueCount * sizeof(VkDeviceQueueCreateInfo)
+    );
 
-    // Declare queue priority
+    // Priority for all queues
     f32 queuePriority = 1.0f;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    for (u32 i = 0; i < queueCount; i++) {
+        printf("%d", queues[i]);
+        VkDeviceQueueCreateInfo queueCreateInfo = {};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = queues[i];
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos[i] = queueCreateInfo;
+    }
 
     // Declare required device features (already checked for availability)
     // Empty for now
@@ -92,8 +134,8 @@ void createVulkanLogicalDevice() {
     // Create logical device
     VkDeviceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = queueCreateInfos;
+    createInfo.queueCreateInfoCount = queueCount;
     createInfo.pEnabledFeatures = &deviceFeatures;
     // TODO: Research about virtual device layers/extensions (is it deprecated?)
 
@@ -105,6 +147,10 @@ void createVulkanLogicalDevice() {
 
     // Get handle for graphics queue
     vkGetDeviceQueue(vulkanDevice, indices.graphics, 0, &vulkanGraphicsQueue);
+    vkGetDeviceQueue(vulkanDevice, indices.present, 0, &vulkanPresentQueue);
+
+    // Free queue infos
+    free(queueCreateInfos);
 }
 
 u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
@@ -126,6 +172,10 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
     struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(device);
     if (indices.isGraphicsSet != QQ_TRUE) {
         // Device must support graphics queue
+        return 0;
+    }
+    if (indices.isPresentSet != QQ_TRUE) {
+        // Device must support presentation queue
         return 0;
     }
 
@@ -286,13 +336,20 @@ void createVulkanInstance() {
     if (instanceCreationSuccess != VK_SUCCESS) {
         printf("Failed to initialize Vulkan instance\n");
     }
+}
 
-    printf("PING\n");
+void createWindowSurface() {
+    printf("Creating KHR surface for window\n");
+    if (glfwCreateWindowSurface(vulkanInstance, window, NULL, &vulkanSurface)) {
+        printf("[ERR] Failed to create window surface\n");
+    }
 }
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
+    // TODO: Setup debug message pipe
+    createWindowSurface();
     pickVulkanPhysicalDevice();
     createVulkanLogicalDevice();
 }
@@ -300,7 +357,10 @@ void initVulkan() {
 void shutdownVulkan() {
     printf("Shutting down Vulkan\n");
     vkDestroyDevice(vulkanDevice, NULL);
-    
+
+    printf("Destroying window surface\n");
+    vkDestroySurfaceKHR(vulkanInstance, vulkanSurface, NULL);
+
     printf("Destroying Vulkan virtual device\n");
     vkDestroyInstance(vulkanInstance, NULL);
 
