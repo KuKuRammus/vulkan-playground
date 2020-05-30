@@ -55,6 +55,8 @@ VkImage* vulkanSwapChainImages;
 VkQueue vulkanGraphicsQueue;
 VkQueue vulkanPresentQueue;
 
+VkImageView* vulkanSwapChainImageViews;
+
 // Rendering surface
 VkSurfaceKHR vulkanSurface;
 
@@ -666,6 +668,52 @@ void createWindowSurface() {
     }
 }
 
+void createVulkanImageViews() {
+    printf("Creating swap chain image views");
+
+    vulkanSwapChainImageViews = (VkImageView*)malloc(
+        vulkanSwapChainImageCount * sizeof(VkImageView)
+    );
+
+    // Create image views
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        VkImageViewCreateInfo createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = vulkanSwapChainImages[i];
+
+        // Define how image should be interpreted and it's format
+        // in this case: 2d image with default image format
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = vulkanSwapChainImageFormat;
+
+        // Set default values for all color channels
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+        // Define image purpose and what parts should be accessed
+        // In this case: color target without mipmaps and multiple layers
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        // Create image
+        if (
+            vkCreateImageView(
+                vulkanDevice,
+                &createInfo,
+                NULL,
+                &vulkanSwapChainImageViews[i]
+            ) != VK_SUCCESS
+        ) {
+            printf("[ERR] Failed to create image view of index %d", i);
+        }
+    }
+}
+
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
@@ -675,10 +723,19 @@ void initVulkan() {
     pickVulkanPhysicalDevice();
     createVulkanLogicalDevice();
     createSwapChain();
+    createVulkanImageViews();
 }
 
 void shutdownVulkan() {
-    printf("Releasing swapchain images info");
+    printf("Destroying image views\n");
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        vkDestroyImageView(vulkanDevice, vulkanSwapChainImageViews[i], NULL);
+    }
+
+    printf("Freeing image views memory\n");
+    free(vulkanSwapChainImageViews);
+
+    printf("Releasing swapchain images info\n");
     free(vulkanSwapChainImages);
 
     printf("Shutting down swapchain\n");
