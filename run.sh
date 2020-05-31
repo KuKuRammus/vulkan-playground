@@ -1,4 +1,5 @@
 #!/usr/bin/bash
 
-./output/bin/qq
+cd output && ./bin/qq
+cd ..
 

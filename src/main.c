@@ -60,6 +60,11 @@ VkImageView* vulkanSwapChainImageViews;
 // Rendering surface
 VkSurfaceKHR vulkanSurface;
 
+typedef struct {
+    u8* data;
+    i64 size;
+} VulkanShaderCode;
+
 // Vulkan swap chain properties
 struct VulkanSwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -714,6 +719,71 @@ void createVulkanImageViews() {
     }
 }
 
+void unloadShaderCode(VulkanShaderCode code) {
+    // Free shader memory
+    free(code.data);
+}
+
+VulkanShaderCode loadShaderCodeByPath(const char* path) {
+    printf("Loading shader code from file: %s\n", path);
+
+    FILE* file = fopen(path, "rb");
+
+    // Open file
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        printf("Error opening: %s\n", path);
+    }
+    
+    VulkanShaderCode code = {
+        .size = 0,
+        .data = NULL
+    };
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    code.size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    // Allocate memory to contain the whole file
+    code.data = malloc(code.size + 1);
+    fread(code.data, 1, code.size, file);
+
+    fclose(file);
+
+    return code;
+}
+
+VkShaderModule createVulkanShaderModule(VulkanShaderCode code) {
+    printf("Creating shader module\n");
+    VkShaderModuleCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = code.size;
+    createInfo.pCode = (u32*)code.data;
+
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(vulkanDevice, &createInfo, NULL, &shaderModule) != VK_SUCCESS) {
+        printf("Failed to create shader module");
+    }
+
+    return shaderModule;
+}
+
+void createGraphicsPipeline() {
+    printf("Creating graphics pipeline\n");
+
+    VulkanShaderCode vertShaderCode = loadShaderCodeByPath("./shader/vert.spv");
+    VulkanShaderCode fragShaderCode = loadShaderCodeByPath("./shader/frag.spv");
+
+    // Create modules
+    VkShaderModule vertShaderModule = createVulkanShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = createVulkanShaderModule(fragShaderCode);
+
+    // Destroy modules
+    vkDestroyShaderModule(vulkanDevice, fragShaderModule, NULL);
+    vkDestroyShaderModule(vulkanDevice, vertShaderModule, NULL);
+}
+
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
@@ -724,6 +794,7 @@ void initVulkan() {
     createVulkanLogicalDevice();
     createSwapChain();
     createVulkanImageViews();
+    createGraphicsPipeline();
 }
 
 void shutdownVulkan() {
