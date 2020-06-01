@@ -67,6 +67,9 @@ VkPipelineLayout vulkanPipelineLayout;
 // Rendering pipeline
 VkPipeline vulkanGraphicsPipeline;
 
+// Framebuffers
+VkFramebuffer* vulkanSwapChainFramebuffers;
+
 
 typedef struct {
     u8* data;
@@ -1065,6 +1068,41 @@ void createVulkanRenderPass() {
     }
 }
 
+void createVulkanFramebuffers() {
+    printf("Creating framebuffers\n");
+
+    // Allocate memory to store frambuffers
+    vulkanSwapChainFramebuffers = (VkFramebuffer*)malloc(
+        vulkanSwapChainImageCount * sizeof(VkFramebuffer)
+    );
+
+    // Create framebuffers for each swap chain image
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        VkImageView attachments[] = {
+            vulkanSwapChainImageViews[i]
+        };
+
+        // Create framebuffer
+        VkFramebufferCreateInfo framebufferInfo = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = vulkanRenderPass,
+            .attachmentCount = 1,
+            .pAttachments = attachments,
+            .width = vulkanSwapChainExtent.width,
+            .height = vulkanSwapChainExtent.height,
+            .layers = 1
+        };
+        VkResult result = vkCreateFramebuffer(
+            vulkanDevice,
+            &framebufferInfo,
+            NULL,
+            &vulkanSwapChainFramebuffers[i]
+        );
+        if (result != VK_SUCCESS) {
+            printf("[ERROR] Failed to create framebuffer");
+        }
+    }
+}
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
@@ -1077,9 +1115,16 @@ void initVulkan() {
     createVulkanImageViews();
     createVulkanRenderPass();
     createGraphicsPipeline();
+    createVulkanFramebuffers();
 }
 
 void shutdownVulkan() {
+    printf("Shutting down framebuffers\n");
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        vkDestroyFramebuffer(vulkanDevice, vulkanSwapChainFramebuffers[i], NULL);
+    }
+    free(vulkanSwapChainFramebuffers);
+
     printf("Shutting down graphics pipeline\n");
     vkDestroyPipeline(vulkanDevice, vulkanGraphicsPipeline, NULL);
 
