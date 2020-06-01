@@ -60,8 +60,13 @@ VkImageView* vulkanSwapChainImageViews;
 // Rendering surface
 VkSurfaceKHR vulkanSurface;
 
-// Rendering pipeline
+// Rendering pass and pipeline layout
+VkRenderPass vulkanRenderPass;
 VkPipelineLayout vulkanPipelineLayout;
+
+// Rendering pipeline
+VkPipeline vulkanGraphicsPipeline;
+
 
 typedef struct {
     u8* data;
@@ -772,10 +777,11 @@ VulkanShaderCode loadShaderCodeByPath(const char* path) {
 
 VkShaderModule createVulkanShaderModule(VulkanShaderCode code) {
     printf("Creating shader module\n");
-    VkShaderModuleCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size;
-    createInfo.pCode = (u32*)code.data;
+    VkShaderModuleCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = code.size,
+        .pCode = (u32*)code.data
+    };
 
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(vulkanDevice, &createInfo, NULL, &shaderModule) != VK_SUCCESS) {
@@ -942,6 +948,47 @@ void createGraphicsPipeline() {
         printf("[ERROR] Failed to create pipeline layout\n");
     }
 
+    // Creat graphics pipeline
+    VkGraphicsPipelineCreateInfo pipelineInfo = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2,
+        .pStages = shaderStages,
+
+        // Combine everything created above
+        .pVertexInputState = &vertexInputInfo,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = NULL,
+        .pColorBlendState = &colorBlending,
+        .pDynamicState = NULL,
+
+        // Reference fixed function stages
+        .layout = vulkanPipelineLayout,
+        
+        // Reference render pass
+        .renderPass = vulkanRenderPass,
+        .subpass = 0,
+
+        // Previous render pipeline
+        // (there is no previous pipeline, so null it)
+        .basePipelineHandle = VK_NULL_HANDLE,
+        .basePipelineIndex = -1
+    };
+
+    VkResult createGraphicsPipelineResult = vkCreateGraphicsPipelines(
+        vulkanDevice,
+        VK_NULL_HANDLE,
+        1,
+        &pipelineInfo,
+        NULL,
+        &vulkanGraphicsPipeline
+    );
+    if (createGraphicsPipelineResult != VK_SUCCESS) {
+        printf("[ERROR] Failed to create graphics pipeline\n");
+    }
+
     // Destroy modules
     vkDestroyShaderModule(vulkanDevice, fragShaderModule, NULL);
     vkDestroyShaderModule(vulkanDevice, vertShaderModule, NULL);
@@ -949,6 +996,73 @@ void createGraphicsPipeline() {
     // Free loaded shader memory
     unloadShaderCode(vertShaderCode);
     unloadShaderCode(fragShaderCode);
+}
+
+void createVulkanRenderPass() {
+    printf("Creating render pass\n");
+
+    // Create color attachment to store color information
+    VkAttachmentDescription colorAttachment = {
+        .format = vulkanSwapChainImageFormat,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+
+        // Clear values at the start
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+
+        // Render to memory
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+
+        // Don't do much with stencil, so dont care what happens there
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+
+        // Initial state of image
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+
+        // Keep present in the chain
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    };
+
+    // Create color pass reference for subpass
+    VkAttachmentReference colorAttachmentRef = {
+        // Attachment index
+        .attachment = 0,
+
+        // Use color layout (optimal variant)
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
+    // Create graphics subpass
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+
+        // Specify reference(-s) and links
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachmentRef
+    };
+
+    // Create render pass
+    VkRenderPassCreateInfo renderPassInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        
+        // List of all attachments
+        .pAttachments = &colorAttachment,
+
+        // Subpasses
+        .subpassCount = 1,
+        .pSubpasses = &subpass
+    };
+    VkResult result = vkCreateRenderPass(
+        vulkanDevice,
+        &renderPassInfo,
+        NULL,
+        &vulkanRenderPass
+    );
+
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Cannot create render pass\n");
+    }
 }
 
 
@@ -961,12 +1075,19 @@ void initVulkan() {
     createVulkanLogicalDevice();
     createSwapChain();
     createVulkanImageViews();
+    createVulkanRenderPass();
     createGraphicsPipeline();
 }
 
 void shutdownVulkan() {
+    printf("Shutting down graphics pipeline\n");
+    vkDestroyPipeline(vulkanDevice, vulkanGraphicsPipeline, NULL);
+
     printf("Shutting down pipeline\n");
     vkDestroyPipelineLayout(vulkanDevice, vulkanPipelineLayout, NULL);
+
+    printf("Shutting down render pass\n");
+    vkDestroyRenderPass(vulkanDevice, vulkanRenderPass, NULL);
 
     printf("Destroying image views\n");
     for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
