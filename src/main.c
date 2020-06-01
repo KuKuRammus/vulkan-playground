@@ -203,10 +203,11 @@ struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice devi
 struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device) {
     printf("Checking for required queue families\n");
 
-    struct VulkanQueueFamilyIndices indices;
-    indices.isGraphicsSet = QQ_FALSE;
-    indices.isPresentSet = QQ_FALSE;
-
+    struct VulkanQueueFamilyIndices indices = {
+        .isGraphicsSet = QQ_FALSE,
+        .isPresentSet = QQ_FALSE
+    };
+    
     u32 queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
 
@@ -257,8 +258,8 @@ void createSwapChain() {
 
     // Determine properties
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(
-            swapChainSupport.formats,
-            swapChainSupport.formatCount
+        swapChainSupport.formats,
+        swapChainSupport.formatCount
     );
     VkPresentModeKHR presentMode = chooseSwapPresentMode(
         swapChainSupport.presentModes,
@@ -277,22 +278,24 @@ void createSwapChain() {
     }
 
     // Actually create swap chain
-    VkSwapchainCreateInfoKHR createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = vulkanSurface;
-    createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = surfaceFormat.format;
-    createInfo.imageColorSpace = surfaceFormat.colorSpace;
-    createInfo.imageExtent = extent;
+    VkSwapchainCreateInfoKHR createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = vulkanSurface,
+        .minImageCount = imageCount,
+        .imageFormat = surfaceFormat.format,
+        .imageColorSpace = surfaceFormat.colorSpace,
+        .imageExtent = extent,
+
+        // Amount of image layers each image consist of
+        // Always one, unless developing stereoscopic rendering
+        .imageArrayLayers = 1,
+
+        // Define operation types on images
+        // In this case, render directly to them
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+    };
     
-    // Amount of image layers each image consist of
-    // Always one, unless developing stereoscopic rendering
-    createInfo.imageArrayLayers = 1;
-
-    // Define operation types on images
-    // In this case, render directly to them
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
+    
     // Determine how to handle swap chain images
     struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
     u32 queueFamilyIndices[2] = {
@@ -388,11 +391,13 @@ void createVulkanLogicalDevice() {
     // Priority for all queues
     f32 queuePriority = 1.0f;
     for (u32 i = 0; i < queueCount; i++) {
-        VkDeviceQueueCreateInfo queueCreateInfo = {};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = queues[i];
-        queueCreateInfo.queueCount = 1;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
+        VkDeviceQueueCreateInfo queueCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = queues[i],
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority
+        };
+
         queueCreateInfos[i] = queueCreateInfo;
     }
 
@@ -401,14 +406,15 @@ void createVulkanLogicalDevice() {
     VkPhysicalDeviceFeatures deviceFeatures = {};
 
     // Create logical device
-    VkDeviceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.pQueueCreateInfos = queueCreateInfos;
-    createInfo.queueCreateInfoCount = queueCount;
-    createInfo.pEnabledFeatures = &deviceFeatures;
-    // TODO: Research about virtual device layers/extensions (is it deprecated?)
-    createInfo.enabledExtensionCount = requiredVulkanDeviceExtensionCount;
-    createInfo.ppEnabledExtensionNames = reqVulkanDeviceExtensions;
+    VkDeviceCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pQueueCreateInfos = queueCreateInfos,
+        .queueCreateInfoCount = queueCount,
+        .pEnabledFeatures = &deviceFeatures,
+        // TODO: Research about virtual device layers/extensions (is it deprecated?)
+        .enabledExtensionCount = requiredVulkanDeviceExtensionCount,
+        .ppEnabledExtensionNames = reqVulkanDeviceExtensions
+    };
 
     if (
         vkCreateDevice(vulkanPhysicalDevice, &createInfo, NULL, &vulkanDevice) != VK_SUCCESS
@@ -629,18 +635,20 @@ void createVulkanInstance() {
 
     // Structure describing application info
     // This structure is optional, however it is recommended to implement it
-    VkApplicationInfo appInfo = {};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "qq";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    VkApplicationInfo appInfo = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "qq",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "No Engine",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_0
+    };
 
     // Structure describing requirements from Vulkan instance
-    VkInstanceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
+    VkInstanceCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &appInfo
+    };
 
     // Describe extensions required
     // For now, just fetch all extensions, required by GLFW
@@ -685,28 +693,33 @@ void createVulkanImageViews() {
 
     // Create image views
     for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
-        VkImageViewCreateInfo createInfo = {};
-        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        createInfo.image = vulkanSwapChainImages[i];
+        VkImageViewCreateInfo createInfo = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = vulkanSwapChainImages[i],
 
-        // Define how image should be interpreted and it's format
-        // in this case: 2d image with default image format
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = vulkanSwapChainImageFormat;
+            // Define how image should be interpreted and it's format
+            // in this case: 2d image with default image format
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = vulkanSwapChainImageFormat,
 
-        // Set default values for all color channels
-        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-
-        // Define image purpose and what parts should be accessed
-        // In this case: color target without mipmaps and multiple layers
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
+            // Set default values for all color channels
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY
+            },
+            
+            // Define image purpose and what parts should be accessed
+            // In this case: color target without mipmaps and multiple layers
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        };
 
         // Create image
         if (
