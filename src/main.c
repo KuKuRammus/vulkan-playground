@@ -70,6 +70,12 @@ VkPipeline vulkanGraphicsPipeline;
 // Framebuffers
 VkFramebuffer* vulkanSwapChainFramebuffers;
 
+// Command pool
+VkCommandPool vulkanCommandPool;
+
+// Command buffers
+VkCommandBuffer* vulkanCommandBuffers;
+
 
 typedef struct {
     u8* data;
@@ -1104,6 +1110,120 @@ void createVulkanFramebuffers() {
     }
 }
 
+void createVulkanCommandPool() {
+    printf("Creating command pool\n");
+
+    struct VulkanQueueFamilyIndices queueFamilyIndices = findVulkanQueueFamilies(
+        vulkanPhysicalDevice
+    );
+
+    // Create command pool (which will be submitted to GPU for processing)
+    VkCommandPoolCreateInfo poolInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = queueFamilyIndices.graphics,
+        .flags = 0
+    };
+    VkResult result = vkCreateCommandPool(vulkanDevice, &poolInfo, NULL, &vulkanCommandPool);
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Failed to create graphics command pool\n");
+    }
+}
+
+void createVulkanCommandBuffers() {
+    printf("Creating command buffer\n");
+
+    // Allocate memory to contain command buffers
+    vulkanCommandBuffers = (VkCommandBuffer*)malloc(
+        vulkanSwapChainImageCount * sizeof(VkCommandBuffer)
+    );
+
+    // Allocate buffers
+    VkCommandBufferAllocateInfo allocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = vulkanCommandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = vulkanSwapChainImageCount
+    };
+    VkResult result = vkAllocateCommandBuffers(
+        vulkanDevice,
+        &allocateInfo,
+        vulkanCommandBuffers
+    );
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Cannot allocate command buffers");
+    }
+
+    // Start buffer recording
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        VkCommandBufferBeginInfo beginInfo = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = 0,
+            .pInheritanceInfo = NULL
+        };
+
+        VkResult beginBufferResult = vkBeginCommandBuffer(
+            vulkanCommandBuffers[i], &beginInfo
+        );
+        if (beginBufferResult != VK_SUCCESS) {
+            printf("[ERROR] Failed to begin command buffer");
+        }
+
+        // Define clear color
+        VkClearValue clearColor = {0.0f,0.0f,0.0f,1.0f};
+
+        // Start render pass
+        VkRenderPassBeginInfo renderPassInfo = {
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            .renderPass = vulkanRenderPass,
+            .framebuffer = vulkanSwapChainFramebuffers[i],
+            .renderArea = {
+                .offset = {0, 0},
+                .extent = vulkanSwapChainExtent
+            },
+            .clearValueCount = 1,
+            .pClearValues = &clearColor
+        };
+        vkCmdBeginRenderPass(
+            vulkanCommandBuffers[i],
+            &renderPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+
+        // Bind graphics pipeline
+        vkCmdBindPipeline(
+            vulkanCommandBuffers[i],
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            vulkanGraphicsPipeline
+        );
+
+        // FOKEN DRAAAAAWWW!!!
+        vkCmdDraw(
+            vulkanCommandBuffers[i],
+            
+            // Vertex count
+            3,
+
+            // Instance count
+            1,
+
+            // First vertex
+            0,
+            
+            // First instance
+            0
+        );
+
+        // End render pass
+        vkCmdEndRenderPass(vulkanCommandBuffers[i]);
+
+        // Stop recording
+        VkResult stopRecordingResult = vkEndCommandBuffer(vulkanCommandBuffers[i]);
+        if (stopRecordingResult != VK_SUCCESS) {
+            printf("[ERROR] Error while stopping buffer cmd recording!\n");
+        }
+    }
+}
+
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
@@ -1116,9 +1236,16 @@ void initVulkan() {
     createVulkanRenderPass();
     createGraphicsPipeline();
     createVulkanFramebuffers();
+    createVulkanCommandPool();
+    createVulkanCommandBuffers();
 }
 
 void shutdownVulkan() {
+    // TODO: Shutdown command buffers
+
+    printf("Shutting down command pool\n");
+    vkDestroyCommandPool(vulkanDevice, vulkanCommandPool, NULL);
+
     printf("Shutting down framebuffers\n");
     for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
         vkDestroyFramebuffer(vulkanDevice, vulkanSwapChainFramebuffers[i], NULL);
