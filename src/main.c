@@ -14,6 +14,7 @@
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
+#define MAX_FRAMES_IN_FLIGHT 2
 
 #ifdef QQ_DEBUG
 const b32 debugModeEnabled = QQ_TRUE;
@@ -76,9 +77,16 @@ VkCommandPool vulkanCommandPool;
 // Command buffers
 VkCommandBuffer* vulkanCommandBuffers;
 
-// Semaphores
-VkSemaphore imageAvailableSemaphore;
-VkSemaphore renderFinishedSemaphore;
+// Current frame index
+u32 currentFrame = 0;
+
+// Semaphores and fence
+VkFence* inFlightFences;
+VkFence* imagesInFlight;
+VkSemaphore* imageAvailableSemaphores;
+VkSemaphore* renderFinishedSemaphores;
+
+
 
 typedef struct {
     u8* data;
@@ -1053,6 +1061,21 @@ void createVulkanRenderPass() {
         .pColorAttachments = &colorAttachmentRef
     };
 
+    // Create subpass depency
+    VkSubpassDependency dependency = {
+        // Dependent subpass and index
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+
+        // Operations to wait on
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = 0,
+
+        // Writing info
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+    };
+
     // Create render pass
     VkRenderPassCreateInfo renderPassInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -1063,7 +1086,11 @@ void createVulkanRenderPass() {
 
         // Subpasses
         .subpassCount = 1,
-        .pSubpasses = &subpass
+        .pSubpasses = &subpass,
+
+        // Dependencies
+        .dependencyCount = 1,
+        .pDependencies = &dependency
     };
     VkResult result = vkCreateRenderPass(
         vulkanDevice,
@@ -1227,8 +1254,35 @@ void createVulkanCommandBuffers() {
     }
 }
 
-void createVulkanSemaphores() {
+void createVulkanSyncObjects() {
     printf("Creating semaphores\n");
+
+    // Allocate memory for fences
+    inFlightFences = (VkFence*)malloc(
+        MAX_FRAMES_IN_FLIGHT * sizeof(VkFence)
+    );
+
+    // Automatically initialize images in flight with null handles
+    imagesInFlight = (VkFence*)malloc(
+        vulkanSwapChainImageCount * sizeof(VkFence)
+    );
+
+    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+        imagesInFlight[i] = VK_NULL_HANDLE;
+    }
+
+    // Allocate memory for semaphores
+    imageAvailableSemaphores = (VkSemaphore*)malloc(
+        MAX_FRAMES_IN_FLIGHT * sizeof(VkSemaphore)
+    );
+    renderFinishedSemaphores = (VkSemaphore*)malloc(
+        MAX_FRAMES_IN_FLIGHT * sizeof(VkSemaphore)
+    );
+
+    VkFenceCreateInfo fenceInfo = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
 
     VkSemaphoreCreateInfo semaphoreInfo = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
@@ -1236,24 +1290,38 @@ void createVulkanSemaphores() {
 
     VkResult result;
 
-    result = vkCreateSemaphore(
-        vulkanDevice,
-        &semaphoreInfo,
-        NULL,
-        &imageAvailableSemaphore
-    );
-    if (result != VK_SUCCESS) {
-        printf("[ERROR] Failed to create image available semaphore");
-    }
+    // Create semaphore pairs
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        result = vkCreateSemaphore(
+            vulkanDevice,
+            &semaphoreInfo,
+            NULL,
+            &imageAvailableSemaphores[i]
+        );
+        if (result != VK_SUCCESS) {
+            printf("[ERROR] Failed to create image available semaphore\n");
+        }
 
-    result = vkCreateSemaphore(
-        vulkanDevice,
-        &semaphoreInfo,
-        NULL,
-        &renderFinishedSemaphore
-    );
-    if (result != VK_SUCCESS) {
-        printf("[ERROR] Failed to create render finished semaphore");
+        result = vkCreateSemaphore(
+            vulkanDevice,
+            &semaphoreInfo,
+            NULL,
+            &renderFinishedSemaphores[i]
+        );
+        if (result != VK_SUCCESS) {
+            printf("[ERROR] Failed to create render finished semaphore\n");
+        }
+
+        result = vkCreateFence(
+            vulkanDevice,
+            &fenceInfo,
+            NULL,
+            &inFlightFences[i]
+        );
+        if (result != VK_SUCCESS) {
+            printf("[ERROR] Failed to create fence\n");
+        }
+
     }
 }
 
@@ -1271,14 +1339,20 @@ void initVulkan() {
     createVulkanFramebuffers();
     createVulkanCommandPool();
     createVulkanCommandBuffers();
-    createVulkanSemaphores();
+    createVulkanSyncObjects();
 }
 
 void shutdownVulkan() {
     printf("Shutting down semaphores\n");
-    vkDestroySemaphore(vulkanDevice, renderFinishedSemaphore, NULL);
-    vkDestroySemaphore(vulkanDevice, imageAvailableSemaphore, NULL);
-
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroySemaphore(vulkanDevice, renderFinishedSemaphores[i], NULL);
+        vkDestroySemaphore(vulkanDevice, imageAvailableSemaphores[i], NULL);
+        vkDestroyFence(vulkanDevice, inFlightFences[i], NULL);
+    }
+    free(renderFinishedSemaphores);
+    free(imageAvailableSemaphores);
+    free(inFlightFences);
+    
     // TODO: Shutdown command buffers
 
     printf("Shutting down command pool\n");
@@ -1329,8 +1403,92 @@ void shutdownVulkan() {
     }
 }
 
+void drawVulkanFrame() {
+    // Wait for the frame to be finished
+    vkWaitForFences(vulkanDevice, 1, &inFlightFences[currentFrame], VK_TRUE, U64_MAX);
 
-void drawVulkanFrame() {}
+    // Aquire image from swap chain
+    u32 imageIndex;
+    vkAcquireNextImageKHR(
+        // Device and swap chain to aquire image from
+        vulkanDevice,
+        vulkanSwapChain,
+
+        // Timeout for image to become available (nanoseconds)
+        // "max" value disables timeout
+        U64_MAX,
+
+        // Objects to signal when image will become available
+        imageAvailableSemaphores[currentFrame],
+        VK_NULL_HANDLE,
+
+        // Available image index (in swaphChainImages)
+        &imageIndex
+    );
+
+    if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+        vkWaitForFences(vulkanDevice, 1, &imagesInFlight[imageIndex], VK_TRUE, U64_MAX);
+    }
+    imagesInFlight[imageIndex] = inFlightFences[currentFrame];
+
+    // Submit command buffer
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    // Specify which semaphores to wait form and in which pipeline
+    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = waitSemaphores;
+    submitInfo.pWaitDstStageMask = waitStages;
+
+    // Specify which command buffer to submit
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &vulkanCommandBuffers[imageIndex];
+
+    // Specify semaphores to trigger when execution is finished
+    VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = signalSemaphores;
+
+    // Reset fences
+    vkResetFences(vulkanDevice, 1, &inFlightFences[currentFrame]);
+    
+    // Submit command to graphics queue
+    if (vkQueueSubmit(
+        vulkanGraphicsQueue,
+        1,
+        &submitInfo,
+        inFlightFences[currentFrame]
+    ) != VK_SUCCESS) {
+        printf("[ERROR] Failed to submit draw command buffer\n");
+    }
+
+    // Swapchains to put images into
+    VkSwapchainKHR swapChains[] = {vulkanSwapChain};
+
+    // Configure presentation
+    VkPresentInfoKHR presentInfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+
+        // Define semaphores to wait
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = signalSemaphores,
+
+        // Sets swapchain
+        .swapchainCount = 1,
+        .pSwapchains = swapChains,
+        .pImageIndices = &imageIndex,
+
+        .pResults = NULL
+    };
+
+    // Queue presentation
+    vkQueuePresentKHR(vulkanPresentQueue, &presentInfo);
+
+    // Update current frame sepahore index
+    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
 
 int main(int argc, const char **argv) {
 
@@ -1354,10 +1512,18 @@ int main(int argc, const char **argv) {
     initVulkan();
 
     // Main loop
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        
+        f64 drawStartTime = glfwGetTime();
         drawVulkanFrame();
+        f64 timeToDraw = glfwGetTime() - drawStartTime;
+        printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/timeToDraw), timeToDraw);
     }
+
+    // Wait till device finished
+    vkDeviceWaitIdle(vulkanDevice);
 
     // Shutdown vulkan
     shutdownVulkan();
