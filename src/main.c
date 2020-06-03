@@ -76,6 +76,9 @@ VkCommandPool vulkanCommandPool;
 // Command buffers
 VkCommandBuffer* vulkanCommandBuffers;
 
+// Semaphores
+VkSemaphore imageAvailableSemaphore;
+VkSemaphore renderFinishedSemaphore;
 
 typedef struct {
     u8* data;
@@ -1224,6 +1227,36 @@ void createVulkanCommandBuffers() {
     }
 }
 
+void createVulkanSemaphores() {
+    printf("Creating semaphores\n");
+
+    VkSemaphoreCreateInfo semaphoreInfo = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    };
+
+    VkResult result;
+
+    result = vkCreateSemaphore(
+        vulkanDevice,
+        &semaphoreInfo,
+        NULL,
+        &imageAvailableSemaphore
+    );
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Failed to create image available semaphore");
+    }
+
+    result = vkCreateSemaphore(
+        vulkanDevice,
+        &semaphoreInfo,
+        NULL,
+        &renderFinishedSemaphore
+    );
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Failed to create render finished semaphore");
+    }
+}
+
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createVulkanInstance();
@@ -1238,9 +1271,14 @@ void initVulkan() {
     createVulkanFramebuffers();
     createVulkanCommandPool();
     createVulkanCommandBuffers();
+    createVulkanSemaphores();
 }
 
 void shutdownVulkan() {
+    printf("Shutting down semaphores\n");
+    vkDestroySemaphore(vulkanDevice, renderFinishedSemaphore, NULL);
+    vkDestroySemaphore(vulkanDevice, imageAvailableSemaphore, NULL);
+
     // TODO: Shutdown command buffers
 
     printf("Shutting down command pool\n");
@@ -1291,6 +1329,9 @@ void shutdownVulkan() {
     }
 }
 
+
+void drawVulkanFrame() {}
+
 int main(int argc, const char **argv) {
 
     // Init GLFW
@@ -1313,14 +1354,9 @@ int main(int argc, const char **argv) {
     initVulkan();
 
     // Main loop
-    f64 lastFrameTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
-        // Calculate frame delta time
-        f64 frameDelta = glfwGetTime() - lastFrameTime;
-        lastFrameTime = glfwGetTime();
-
         glfwPollEvents();
-        // printf("%f\n", frameDelta);
+        drawVulkanFrame();
     }
 
     // Shutdown vulkan
