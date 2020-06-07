@@ -41,41 +41,41 @@ const b32 debugModeEnabled = QQ_FALSE;
 GLFWwindow *window;
 
 // Vulkan info
-VkLayerProperties *vulkanLayers;
-VkInstance vulkanInstance;
-u32 vulkanPhysicalDeviceRating = 0;
-VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE;
-VkDevice vulkanDevice;
+VkLayerProperties *layerProperties;
+VkInstance instance;
+u32 physicalDeviceRating = 0;
+VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+VkDevice logicalDevice;
 
 // Vulkan swap chain related stuff
-VkSwapchainKHR vulkanSwapChain;
-u32 vulkanSwapChainImageCount = 0;
-VkFormat vulkanSwapChainImageFormat;
-VkExtent2D vulkanSwapChainExtent;
-VkImage* vulkanSwapChainImages;
-VkQueue vulkanGraphicsQueue;
-VkQueue vulkanPresentQueue;
+VkSwapchainKHR swapchain;
+u32 swapchainImageCount = 0;
+VkFormat swapchainImageFormat;
+VkExtent2D swapchainExtent;
+VkImage* swapchainImages;
+VkQueue graphicsQueue;
+VkQueue presentQueue;
 
-VkImageView* vulkanSwapChainImageViews;
+VkImageView* swapchainImageViews;
 
 // Rendering surface
-VkSurfaceKHR vulkanSurface;
+VkSurfaceKHR surface;
 
 // Rendering pass and pipeline layout
-VkRenderPass vulkanRenderPass;
-VkPipelineLayout vulkanPipelineLayout;
+VkRenderPass renderPass;
+VkPipelineLayout pipelineLayout;
 
 // Rendering pipeline
-VkPipeline vulkanGraphicsPipeline;
+VkPipeline graphicsPipeline;
 
 // Framebuffers
-VkFramebuffer* vulkanSwapChainFramebuffers;
+VkFramebuffer* swapchainFramebuffers;
 
 // Command pool
-VkCommandPool vulkanCommandPool;
+VkCommandPool commandPool;
 
 // Command buffers
-VkCommandBuffer* vulkanCommandBuffers;
+VkCommandBuffer* commandBuffers;
 
 // Current frame index
 u32 currentFrame = 0;
@@ -86,15 +86,13 @@ VkFence* imagesInFlight;
 VkSemaphore* imageAvailableSemaphores;
 VkSemaphore* renderFinishedSemaphores;
 
-
-
 typedef struct {
     u8* data;
     i64 size;
 } VulkanShaderCode;
 
 // Vulkan swap chain properties
-struct VulkanSwapChainSupportDetails {
+typedef struct {
     VkSurfaceCapabilitiesKHR capabilities;
     
     u32 formatCount; 
@@ -102,10 +100,10 @@ struct VulkanSwapChainSupportDetails {
     
     u32 presentModeCount;
     VkPresentModeKHR* presentModes;
-};
+} SwapchainSupportDetails;
 
 // Vulkan queue families
-struct VulkanQueueFamilyIndices {
+typedef struct {
     // Graphics
     b32 isGraphicsSet;
     u32 graphics;
@@ -113,7 +111,7 @@ struct VulkanQueueFamilyIndices {
     // Presentation
     b32 isPresentSet;
     u32 present;
-};
+} QueueFamilyIndices;
 
 // Required validation layers
 const char *requiredVulkanLayers[1] = { "VK_LAYER_KHRONOS_validation" };
@@ -178,23 +176,23 @@ VkExtent2D chooseSwapExtent(VkSurfaceCapabilitiesKHR capabilities) {
     }
 }
 
-struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
-    struct VulkanSwapChainSupportDetails details;
+SwapchainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
+    SwapchainSupportDetails details;
     details.formatCount = 0;
     details.presentModeCount = 0;
 
     // Fetch capabilities
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, vulkanSurface, &details.capabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
 
     // Fetch format count
-    vkGetPhysicalDeviceSurfaceFormatsKHR(device, vulkanSurface, &details.formatCount, NULL);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &details.formatCount, NULL);
     if (details.formatCount != 0) {
         details.formats = (VkSurfaceFormatKHR*)malloc(
             details.formatCount * sizeof(VkSurfaceFormatKHR)
         );
         vkGetPhysicalDeviceSurfaceFormatsKHR(
             device,
-            vulkanSurface,
+            surface,
             &details.formatCount,
             details.formats
         );
@@ -203,7 +201,7 @@ struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice devi
     // Fetch present modes
     vkGetPhysicalDeviceSurfacePresentModesKHR(
         device,
-        vulkanSurface,
+        surface,
         &details.presentModeCount,
         NULL
     );
@@ -213,7 +211,7 @@ struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice devi
         );
         vkGetPhysicalDeviceSurfacePresentModesKHR(
             device,
-            vulkanSurface,
+            surface,
             &details.presentModeCount,
             details.presentModes
         );
@@ -225,10 +223,10 @@ struct VulkanSwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice devi
     return details;
 }
 
-struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device) {
+QueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device) {
     printf("Checking for required queue families\n");
 
-    struct VulkanQueueFamilyIndices indices = {
+    QueueFamilyIndices indices = {
         .isGraphicsSet = QQ_FALSE,
         .isPresentSet = QQ_FALSE
     };
@@ -253,7 +251,7 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
         }
 
         VkBool32 presentSupport = QQ_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vulkanSurface, &presentSupport);
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
         if (indices.isPresentSet == QQ_FALSE && presentSupport != QQ_FALSE) {
             indices.present = i;
             indices.isPresentSet = QQ_TRUE;
@@ -274,11 +272,11 @@ struct VulkanQueueFamilyIndices findVulkanQueueFamilies(VkPhysicalDevice device)
     return indices;
 }
 
-void createSwapChain() {
+void createSwapchain() {
     printf("Creating swapchain\n");
 
-    struct VulkanSwapChainSupportDetails swapChainSupport = querySwapChainSupport(
-        vulkanPhysicalDevice
+    SwapchainSupportDetails swapChainSupport = querySwapChainSupport(
+        physicalDevice
     );
 
     // Determine properties
@@ -305,7 +303,7 @@ void createSwapChain() {
     // Actually create swap chain
     VkSwapchainCreateInfoKHR createInfo = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = vulkanSurface,
+        .surface = surface,
         .minImageCount = imageCount,
         .imageFormat = surfaceFormat.format,
         .imageColorSpace = surfaceFormat.colorSpace,
@@ -322,7 +320,7 @@ void createSwapChain() {
     
     
     // Determine how to handle swap chain images
-    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
+    QueueFamilyIndices indices = findVulkanQueueFamilies(physicalDevice);
     u32 queueFamilyIndices[2] = {
         indices.graphics,
         indices.present
@@ -361,35 +359,35 @@ void createSwapChain() {
     
     // Create swapchain
     if (
-        vkCreateSwapchainKHR(vulkanDevice, &createInfo, NULL, &vulkanSwapChain) != VK_SUCCESS
+        vkCreateSwapchainKHR(logicalDevice, &createInfo, NULL, &swapchain) != VK_SUCCESS
     ) {
         printf("[ERR] Failed to create vulkan swapchain");
     }
 
     // Get swap chain images
     vkGetSwapchainImagesKHR(
-        vulkanDevice,
-        vulkanSwapChain,
-        &vulkanSwapChainImageCount,
+        logicalDevice,
+        swapchain,
+        &swapchainImageCount,
         NULL
     );
 
     // Allocate memory to store images
-    vulkanSwapChainImages = (VkImage*)malloc(
-        vulkanSwapChainImageCount * sizeof(VkImage)
+    swapchainImages = (VkImage*)malloc(
+        swapchainImageCount * sizeof(VkImage)
     );
 
     // Store images
     vkGetSwapchainImagesKHR(
-        vulkanDevice,
-        vulkanSwapChain,
-        &vulkanSwapChainImageCount,
-        vulkanSwapChainImages
+        logicalDevice,
+        swapchain,
+        &swapchainImageCount,
+        swapchainImages
     );
 
     // Save format and extent
-    vulkanSwapChainImageFormat = surfaceFormat.format;
-    vulkanSwapChainExtent = extent;
+    swapchainImageFormat = surfaceFormat.format;
+    swapchainExtent = extent;
 
     // Free resources
     if (swapChainSupport.formatCount != 0) {
@@ -402,9 +400,9 @@ void createSwapChain() {
 }
 
 
-void createVulkanLogicalDevice() {
+void createLogicalDevice() {
     printf("Creating vulkan logical device\n");
-    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(vulkanPhysicalDevice);
+    QueueFamilyIndices indices = findVulkanQueueFamilies(physicalDevice);
 
     // Create list of queue create infos
     u32 queueCount = 2;
@@ -442,14 +440,14 @@ void createVulkanLogicalDevice() {
     };
 
     if (
-        vkCreateDevice(vulkanPhysicalDevice, &createInfo, NULL, &vulkanDevice) != VK_SUCCESS
+        vkCreateDevice(physicalDevice, &createInfo, NULL, &logicalDevice) != VK_SUCCESS
     ) {
         printf("[ERR] Failed to create vulkan virtual device");
     }
 
     // Get handle for graphics queue
-    vkGetDeviceQueue(vulkanDevice, indices.graphics, 0, &vulkanGraphicsQueue);
-    vkGetDeviceQueue(vulkanDevice, indices.present, 0, &vulkanPresentQueue);
+    vkGetDeviceQueue(logicalDevice, indices.graphics, 0, &graphicsQueue);
+    vkGetDeviceQueue(logicalDevice, indices.present, 0, &presentQueue);
 
     // Free queue infos
     free(queueCreateInfos);
@@ -506,7 +504,7 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
     }
 
     // Check queue families
-    struct VulkanQueueFamilyIndices indices = findVulkanQueueFamilies(device);
+    QueueFamilyIndices indices = findVulkanQueueFamilies(device);
     if (indices.isGraphicsSet != QQ_TRUE) {
         // Device must support graphics queue
         return 0;
@@ -522,7 +520,7 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
         return 0;
     }
 
-    struct VulkanSwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+    SwapchainSupportDetails swapChainSupport = querySwapChainSupport(device);
     b32 swapChainWorkingCorrectly = (
         swapChainSupport.formatCount != 0
         && swapChainSupport.presentModeCount != 0
@@ -550,11 +548,11 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
     return score;
 }
 
-void pickVulkanPhysicalDevice() {
+void pickPhysicalDevice() {
     printf("Picking vulkan physical device\n");
 
     u32 deviceCount = 0;
-    vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, NULL);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, NULL);
 
     if (deviceCount == 0) {
         printf(" [ERR] Failed to find GPUs with Vulkan support\n");
@@ -563,7 +561,7 @@ void pickVulkanPhysicalDevice() {
     VkPhysicalDevice* devices = (VkPhysicalDevice *)malloc(
         deviceCount * sizeof(VkPhysicalDevice)
     );
-    vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, devices);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices);
 
     for (u32 i = 0; i < deviceCount; i++) {
         u32 score = rateVulkanPhysicalDevice(devices[i]);
@@ -571,13 +569,13 @@ void pickVulkanPhysicalDevice() {
             continue;
         }
 
-        if (score > vulkanPhysicalDeviceRating) {
-            vulkanPhysicalDevice = devices[i];
-            vulkanPhysicalDeviceRating = score;
+        if (score > physicalDeviceRating) {
+            physicalDevice = devices[i];
+            physicalDeviceRating = score;
         }
    }
 
-    if (vulkanPhysicalDevice == VK_NULL_HANDLE) {
+    if (physicalDevice == VK_NULL_HANDLE) {
         printf(" [ERR] All devices are failed to meet requirements\n");
     }
 
@@ -592,8 +590,8 @@ b32 checkVulkanValidationLayerSupport() {
     vkEnumerateInstanceLayerProperties(&availableLayerCount, NULL);
 
     // Allocate memory to store all available layers
-    vulkanLayers = (VkLayerProperties *) malloc(availableLayerCount * sizeof(VkLayerProperties));
-    vkEnumerateInstanceLayerProperties(&availableLayerCount, vulkanLayers);
+    layerProperties = (VkLayerProperties *) malloc(availableLayerCount * sizeof(VkLayerProperties));
+    vkEnumerateInstanceLayerProperties(&availableLayerCount, layerProperties);
 
     // Iterate over available layers to check if required layers are supported
     b32 allLayersIsFound = QQ_TRUE;
@@ -601,7 +599,7 @@ b32 checkVulkanValidationLayerSupport() {
         b32 layerIsFound = QQ_FALSE;
 
         for (u32 j = 0; j < availableLayerCount; j++) {
-            if (strcmp(requiredVulkanLayers[i], vulkanLayers[j].layerName) == 0) {
+            if (strcmp(requiredVulkanLayers[i], layerProperties[j].layerName) == 0) {
                 layerIsFound = QQ_TRUE;
                 break;
             }
@@ -647,7 +645,7 @@ void displaySupportedVulkanExtensions() {
     free(availableExtensions);
 }
 
-void createVulkanInstance() {
+void createInstance() {
     printf("Creating Vulkan instance\n");
 
     // Display supported extensions
@@ -696,36 +694,36 @@ void createVulkanInstance() {
     }
 
     // Create Vulkan instance
-    VkResult instanceCreationSuccess = vkCreateInstance(&createInfo, NULL, &vulkanInstance);
+    VkResult instanceCreationSuccess = vkCreateInstance(&createInfo, NULL, &instance);
     if (instanceCreationSuccess != VK_SUCCESS) {
         printf("Failed to initialize Vulkan instance\n");
     }
 }
 
-void createWindowSurface() {
+void createSurface() {
     printf("Creating KHR surface for window\n");
-    if (glfwCreateWindowSurface(vulkanInstance, window, NULL, &vulkanSurface)) {
+    if (glfwCreateWindowSurface(instance, window, NULL, &surface)) {
         printf("[ERR] Failed to create window surface\n");
     }
 }
 
-void createVulkanImageViews() {
+void createImageViews() {
     printf("Creating swap chain image views");
 
-    vulkanSwapChainImageViews = (VkImageView*)malloc(
-        vulkanSwapChainImageCount * sizeof(VkImageView)
+    swapchainImageViews = (VkImageView*)malloc(
+        swapchainImageCount * sizeof(VkImageView)
     );
 
     // Create image views
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+    for (u32 i = 0; i < swapchainImageCount; i++) {
         VkImageViewCreateInfo createInfo = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = vulkanSwapChainImages[i],
+            .image = swapchainImages[i],
 
             // Define how image should be interpreted and it's format
             // in this case: 2d image with default image format
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = vulkanSwapChainImageFormat,
+            .format = swapchainImageFormat,
 
             // Set default values for all color channels
             .components = {
@@ -749,10 +747,10 @@ void createVulkanImageViews() {
         // Create image
         if (
             vkCreateImageView(
-                vulkanDevice,
+                logicalDevice,
                 &createInfo,
                 NULL,
-                &vulkanSwapChainImageViews[i]
+                &swapchainImageViews[i]
             ) != VK_SUCCESS
         ) {
             printf("[ERR] Failed to create image view of index %d", i);
@@ -804,7 +802,7 @@ VkShaderModule createVulkanShaderModule(VulkanShaderCode code) {
     };
 
     VkShaderModule shaderModule;
-    if (vkCreateShaderModule(vulkanDevice, &createInfo, NULL, &shaderModule) != VK_SUCCESS) {
+    if (vkCreateShaderModule(logicalDevice, &createInfo, NULL, &shaderModule) != VK_SUCCESS) {
         printf("Failed to create shader module");
     }
 
@@ -867,8 +865,8 @@ void createGraphicsPipeline() {
     VkViewport viewport = {
         .x = 0.0f,
         .y = 0.0f,
-        .width = (f32)vulkanSwapChainExtent.width,
-        .height = (f32)vulkanSwapChainExtent.height,
+        .width = (f32)swapchainExtent.width,
+        .height = (f32)swapchainExtent.height,
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
@@ -876,7 +874,7 @@ void createGraphicsPipeline() {
     // Define range, outside of which every geometry will be discarded
     VkRect2D scissor = {
         .offset = {0, 0},
-        .extent = vulkanSwapChainExtent
+        .extent = swapchainExtent
     };
 
     // Combine viewport and scissor into viewport state
@@ -959,10 +957,10 @@ void createGraphicsPipeline() {
     };
 
     VkResult result = vkCreatePipelineLayout(
-        vulkanDevice,
+        logicalDevice,
         &pipelineLayoutInfo,
         NULL,
-        &vulkanPipelineLayout
+        &pipelineLayout
     );
     if (result != VK_SUCCESS) {
         printf("[ERROR] Failed to create pipeline layout\n");
@@ -985,10 +983,10 @@ void createGraphicsPipeline() {
         .pDynamicState = NULL,
 
         // Reference fixed function stages
-        .layout = vulkanPipelineLayout,
+        .layout = pipelineLayout,
         
         // Reference render pass
-        .renderPass = vulkanRenderPass,
+        .renderPass = renderPass,
         .subpass = 0,
 
         // Previous render pipeline
@@ -998,32 +996,32 @@ void createGraphicsPipeline() {
     };
 
     VkResult createGraphicsPipelineResult = vkCreateGraphicsPipelines(
-        vulkanDevice,
+        logicalDevice,
         VK_NULL_HANDLE,
         1,
         &pipelineInfo,
         NULL,
-        &vulkanGraphicsPipeline
+        &graphicsPipeline
     );
     if (createGraphicsPipelineResult != VK_SUCCESS) {
         printf("[ERROR] Failed to create graphics pipeline\n");
     }
 
     // Destroy modules
-    vkDestroyShaderModule(vulkanDevice, fragShaderModule, NULL);
-    vkDestroyShaderModule(vulkanDevice, vertShaderModule, NULL);
+    vkDestroyShaderModule(logicalDevice, fragShaderModule, NULL);
+    vkDestroyShaderModule(logicalDevice, vertShaderModule, NULL);
 
     // Free loaded shader memory
     unloadShaderCode(vertShaderCode);
     unloadShaderCode(fragShaderCode);
 }
 
-void createVulkanRenderPass() {
+void createRenderPass() {
     printf("Creating render pass\n");
 
     // Create color attachment to store color information
     VkAttachmentDescription colorAttachment = {
-        .format = vulkanSwapChainImageFormat,
+        .format = swapchainImageFormat,
         .samples = VK_SAMPLE_COUNT_1_BIT,
 
         // Clear values at the start
@@ -1093,10 +1091,10 @@ void createVulkanRenderPass() {
         .pDependencies = &dependency
     };
     VkResult result = vkCreateRenderPass(
-        vulkanDevice,
+        logicalDevice,
         &renderPassInfo,
         NULL,
-        &vulkanRenderPass
+        &renderPass
     );
 
     if (result != VK_SUCCESS) {
@@ -1104,35 +1102,35 @@ void createVulkanRenderPass() {
     }
 }
 
-void createVulkanFramebuffers() {
+void createFramebuffers() {
     printf("Creating framebuffers\n");
 
     // Allocate memory to store frambuffers
-    vulkanSwapChainFramebuffers = (VkFramebuffer*)malloc(
-        vulkanSwapChainImageCount * sizeof(VkFramebuffer)
+    swapchainFramebuffers = (VkFramebuffer*)malloc(
+        swapchainImageCount * sizeof(VkFramebuffer)
     );
 
     // Create framebuffers for each swap chain image
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+    for (u32 i = 0; i < swapchainImageCount; i++) {
         VkImageView attachments[] = {
-            vulkanSwapChainImageViews[i]
+            swapchainImageViews[i]
         };
 
         // Create framebuffer
         VkFramebufferCreateInfo framebufferInfo = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .renderPass = vulkanRenderPass,
+            .renderPass = renderPass,
             .attachmentCount = 1,
             .pAttachments = attachments,
-            .width = vulkanSwapChainExtent.width,
-            .height = vulkanSwapChainExtent.height,
+            .width = swapchainExtent.width,
+            .height = swapchainExtent.height,
             .layers = 1
         };
         VkResult result = vkCreateFramebuffer(
-            vulkanDevice,
+            logicalDevice,
             &framebufferInfo,
             NULL,
-            &vulkanSwapChainFramebuffers[i]
+            &swapchainFramebuffers[i]
         );
         if (result != VK_SUCCESS) {
             printf("[ERROR] Failed to create framebuffer");
@@ -1140,11 +1138,11 @@ void createVulkanFramebuffers() {
     }
 }
 
-void createVulkanCommandPool() {
+void createCommandPool() {
     printf("Creating command pool\n");
 
-    struct VulkanQueueFamilyIndices queueFamilyIndices = findVulkanQueueFamilies(
-        vulkanPhysicalDevice
+    QueueFamilyIndices queueFamilyIndices = findVulkanQueueFamilies(
+        physicalDevice
     );
 
     // Create command pool (which will be submitted to GPU for processing)
@@ -1153,38 +1151,38 @@ void createVulkanCommandPool() {
         .queueFamilyIndex = queueFamilyIndices.graphics,
         .flags = 0
     };
-    VkResult result = vkCreateCommandPool(vulkanDevice, &poolInfo, NULL, &vulkanCommandPool);
+    VkResult result = vkCreateCommandPool(logicalDevice, &poolInfo, NULL, &commandPool);
     if (result != VK_SUCCESS) {
         printf("[ERROR] Failed to create graphics command pool\n");
     }
 }
 
-void createVulkanCommandBuffers() {
+void createCommandBuffers() {
     printf("Creating command buffer\n");
 
     // Allocate memory to contain command buffers
-    vulkanCommandBuffers = (VkCommandBuffer*)malloc(
-        vulkanSwapChainImageCount * sizeof(VkCommandBuffer)
+    commandBuffers = (VkCommandBuffer*)malloc(
+        swapchainImageCount * sizeof(VkCommandBuffer)
     );
 
     // Allocate buffers
     VkCommandBufferAllocateInfo allocateInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = vulkanCommandPool,
+        .commandPool = commandPool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = vulkanSwapChainImageCount
+        .commandBufferCount = swapchainImageCount
     };
     VkResult result = vkAllocateCommandBuffers(
-        vulkanDevice,
+        logicalDevice,
         &allocateInfo,
-        vulkanCommandBuffers
+        commandBuffers
     );
     if (result != VK_SUCCESS) {
         printf("[ERROR] Cannot allocate command buffers");
     }
 
     // Start buffer recording
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+    for (u32 i = 0; i < swapchainImageCount; i++) {
         VkCommandBufferBeginInfo beginInfo = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = 0,
@@ -1192,7 +1190,7 @@ void createVulkanCommandBuffers() {
         };
 
         VkResult beginBufferResult = vkBeginCommandBuffer(
-            vulkanCommandBuffers[i], &beginInfo
+            commandBuffers[i], &beginInfo
         );
         if (beginBufferResult != VK_SUCCESS) {
             printf("[ERROR] Failed to begin command buffer");
@@ -1204,31 +1202,31 @@ void createVulkanCommandBuffers() {
         // Start render pass
         VkRenderPassBeginInfo renderPassInfo = {
             .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = vulkanRenderPass,
-            .framebuffer = vulkanSwapChainFramebuffers[i],
+            .renderPass = renderPass,
+            .framebuffer = swapchainFramebuffers[i],
             .renderArea = {
                 .offset = {0, 0},
-                .extent = vulkanSwapChainExtent
+                .extent = swapchainExtent
             },
             .clearValueCount = 1,
             .pClearValues = &clearColor
         };
         vkCmdBeginRenderPass(
-            vulkanCommandBuffers[i],
+            commandBuffers[i],
             &renderPassInfo,
             VK_SUBPASS_CONTENTS_INLINE
         );
 
         // Bind graphics pipeline
         vkCmdBindPipeline(
-            vulkanCommandBuffers[i],
+            commandBuffers[i],
             VK_PIPELINE_BIND_POINT_GRAPHICS,
-            vulkanGraphicsPipeline
+            graphicsPipeline
         );
 
         // FOKEN DRAAAAAWWW!!!
         vkCmdDraw(
-            vulkanCommandBuffers[i],
+            commandBuffers[i],
             
             // Vertex count
             3,
@@ -1244,17 +1242,17 @@ void createVulkanCommandBuffers() {
         );
 
         // End render pass
-        vkCmdEndRenderPass(vulkanCommandBuffers[i]);
+        vkCmdEndRenderPass(commandBuffers[i]);
 
         // Stop recording
-        VkResult stopRecordingResult = vkEndCommandBuffer(vulkanCommandBuffers[i]);
+        VkResult stopRecordingResult = vkEndCommandBuffer(commandBuffers[i]);
         if (stopRecordingResult != VK_SUCCESS) {
             printf("[ERROR] Error while stopping buffer cmd recording!\n");
         }
     }
 }
 
-void createVulkanSyncObjects() {
+void createSyncObjects() {
     printf("Creating semaphores\n");
 
     // Allocate memory for fences
@@ -1264,10 +1262,10 @@ void createVulkanSyncObjects() {
 
     // Automatically initialize images in flight with null handles
     imagesInFlight = (VkFence*)malloc(
-        vulkanSwapChainImageCount * sizeof(VkFence)
+        swapchainImageCount * sizeof(VkFence)
     );
 
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
+    for (u32 i = 0; i < swapchainImageCount; i++) {
         imagesInFlight[i] = VK_NULL_HANDLE;
     }
 
@@ -1293,7 +1291,7 @@ void createVulkanSyncObjects() {
     // Create semaphore pairs
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         result = vkCreateSemaphore(
-            vulkanDevice,
+            logicalDevice,
             &semaphoreInfo,
             NULL,
             &imageAvailableSemaphores[i]
@@ -1303,7 +1301,7 @@ void createVulkanSyncObjects() {
         }
 
         result = vkCreateSemaphore(
-            vulkanDevice,
+            logicalDevice,
             &semaphoreInfo,
             NULL,
             &renderFinishedSemaphores[i]
@@ -1313,7 +1311,7 @@ void createVulkanSyncObjects() {
         }
 
         result = vkCreateFence(
-            vulkanDevice,
+            logicalDevice,
             &fenceInfo,
             NULL,
             &inFlightFences[i]
@@ -1327,27 +1325,27 @@ void createVulkanSyncObjects() {
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
-    createVulkanInstance();
+    createInstance();
     // TODO: Setup debug message pipe
-    createWindowSurface();
-    pickVulkanPhysicalDevice();
-    createVulkanLogicalDevice();
-    createSwapChain();
-    createVulkanImageViews();
-    createVulkanRenderPass();
+    createSurface();
+    pickPhysicalDevice();
+    createLogicalDevice();
+    createSwapchain();
+    createImageViews();
+    createRenderPass();
     createGraphicsPipeline();
-    createVulkanFramebuffers();
-    createVulkanCommandPool();
-    createVulkanCommandBuffers();
-    createVulkanSyncObjects();
+    createFramebuffers();
+    createCommandPool();
+    createCommandBuffers();
+    createSyncObjects();
 }
 
 void shutdownVulkan() {
     printf("Shutting down semaphores\n");
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroySemaphore(vulkanDevice, renderFinishedSemaphores[i], NULL);
-        vkDestroySemaphore(vulkanDevice, imageAvailableSemaphores[i], NULL);
-        vkDestroyFence(vulkanDevice, inFlightFences[i], NULL);
+        vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], NULL);
+        vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], NULL);
+        vkDestroyFence(logicalDevice, inFlightFences[i], NULL);
     }
     free(renderFinishedSemaphores);
     free(imageAvailableSemaphores);
@@ -1356,63 +1354,63 @@ void shutdownVulkan() {
     // TODO: Shutdown command buffers
 
     printf("Shutting down command pool\n");
-    vkDestroyCommandPool(vulkanDevice, vulkanCommandPool, NULL);
+    vkDestroyCommandPool(logicalDevice, commandPool, NULL);
 
     printf("Shutting down framebuffers\n");
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
-        vkDestroyFramebuffer(vulkanDevice, vulkanSwapChainFramebuffers[i], NULL);
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        vkDestroyFramebuffer(logicalDevice, swapchainFramebuffers[i], NULL);
     }
-    free(vulkanSwapChainFramebuffers);
+    free(swapchainFramebuffers);
 
     printf("Shutting down graphics pipeline\n");
-    vkDestroyPipeline(vulkanDevice, vulkanGraphicsPipeline, NULL);
+    vkDestroyPipeline(logicalDevice, graphicsPipeline, NULL);
 
     printf("Shutting down pipeline\n");
-    vkDestroyPipelineLayout(vulkanDevice, vulkanPipelineLayout, NULL);
+    vkDestroyPipelineLayout(logicalDevice, pipelineLayout, NULL);
 
     printf("Shutting down render pass\n");
-    vkDestroyRenderPass(vulkanDevice, vulkanRenderPass, NULL);
+    vkDestroyRenderPass(logicalDevice, renderPass, NULL);
 
     printf("Destroying image views\n");
-    for (u32 i = 0; i < vulkanSwapChainImageCount; i++) {
-        vkDestroyImageView(vulkanDevice, vulkanSwapChainImageViews[i], NULL);
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        vkDestroyImageView(logicalDevice, swapchainImageViews[i], NULL);
     }
 
     printf("Freeing image views memory\n");
-    free(vulkanSwapChainImageViews);
+    free(swapchainImageViews);
 
     printf("Releasing swapchain images info\n");
-    free(vulkanSwapChainImages);
+    free(swapchainImages);
 
     printf("Shutting down swapchain\n");
-    vkDestroySwapchainKHR(vulkanDevice, vulkanSwapChain, NULL);
+    vkDestroySwapchainKHR(logicalDevice, swapchain, NULL);
 
     printf("Shutting down Vulkan\n");
-    vkDestroyDevice(vulkanDevice, NULL);
+    vkDestroyDevice(logicalDevice, NULL);
 
     printf("Destroying window surface\n");
-    vkDestroySurfaceKHR(vulkanInstance, vulkanSurface, NULL);
+    vkDestroySurfaceKHR(instance, surface, NULL);
 
     printf("Destroying Vulkan virtual device\n");
-    vkDestroyInstance(vulkanInstance, NULL);
+    vkDestroyInstance(instance, NULL);
 
     if (debugModeEnabled) {
         // Free layer info data
         printf("Freeing Vulkan layers info");
-        free(vulkanLayers);
+        free(layerProperties);
     }
 }
 
 void drawVulkanFrame() {
     // Wait for the frame to be finished
-    vkWaitForFences(vulkanDevice, 1, &inFlightFences[currentFrame], VK_TRUE, U64_MAX);
+    vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, U64_MAX);
 
     // Aquire image from swap chain
     u32 imageIndex;
     vkAcquireNextImageKHR(
         // Device and swap chain to aquire image from
-        vulkanDevice,
-        vulkanSwapChain,
+        logicalDevice,
+        swapchain,
 
         // Timeout for image to become available (nanoseconds)
         // "max" value disables timeout
@@ -1427,7 +1425,7 @@ void drawVulkanFrame() {
     );
 
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
-        vkWaitForFences(vulkanDevice, 1, &imagesInFlight[imageIndex], VK_TRUE, U64_MAX);
+        vkWaitForFences(logicalDevice, 1, &imagesInFlight[imageIndex], VK_TRUE, U64_MAX);
     }
     imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
@@ -1444,7 +1442,7 @@ void drawVulkanFrame() {
 
     // Specify which command buffer to submit
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &vulkanCommandBuffers[imageIndex];
+    submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
 
     // Specify semaphores to trigger when execution is finished
     VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
@@ -1452,11 +1450,11 @@ void drawVulkanFrame() {
     submitInfo.pSignalSemaphores = signalSemaphores;
 
     // Reset fences
-    vkResetFences(vulkanDevice, 1, &inFlightFences[currentFrame]);
+    vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
     
     // Submit command to graphics queue
     if (vkQueueSubmit(
-        vulkanGraphicsQueue,
+        graphicsQueue,
         1,
         &submitInfo,
         inFlightFences[currentFrame]
@@ -1465,7 +1463,7 @@ void drawVulkanFrame() {
     }
 
     // Swapchains to put images into
-    VkSwapchainKHR swapChains[] = {vulkanSwapChain};
+    VkSwapchainKHR swapChains[] = {swapchain};
 
     // Configure presentation
     VkPresentInfoKHR presentInfo = {
@@ -1484,7 +1482,7 @@ void drawVulkanFrame() {
     };
 
     // Queue presentation
-    vkQueuePresentKHR(vulkanPresentQueue, &presentInfo);
+    vkQueuePresentKHR(presentQueue, &presentInfo);
 
     // Update current frame sepahore index
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1523,7 +1521,7 @@ int main(int argc, const char **argv) {
     }
 
     // Wait till device finished
-    vkDeviceWaitIdle(vulkanDevice);
+    vkDeviceWaitIdle(logicalDevice);
 
     // Shutdown vulkan
     shutdownVulkan();
