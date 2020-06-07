@@ -1321,44 +1321,21 @@ void createSyncObjects() {
     }
 }
 
-void initVulkan() {
-    printf("Initializing Vulkan\n");
-    createInstance();
-    // TODO: Setup debug message pipe
-    createSurface();
-    pickPhysicalDevice();
-    createLogicalDevice();
-    createSwapchain();
-    createImageViews();
-    createRenderPass();
-    createGraphicsPipeline();
-    createFramebuffers();
-    createCommandPool();
-    createCommandBuffers();
-    createSyncObjects();
-}
-
-void shutdownVulkan() {
-    printf("Shutting down semaphores\n");
-    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], NULL);
-        vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], NULL);
-        vkDestroyFence(logicalDevice, inFlightFences[i], NULL);
-    }
-    free(renderFinishedSemaphores);
-    free(imageAvailableSemaphores);
-    free(inFlightFences);
-    
-    // TODO: Shutdown command buffers
-
-    printf("Shutting down command pool\n");
-    vkDestroyCommandPool(logicalDevice, commandPool, NULL);
-
+void shutdownSwapchain() {
     printf("Shutting down framebuffers\n");
     for (u32 i = 0; i < swapchainImageCount; i++) {
         vkDestroyFramebuffer(logicalDevice, swapchainFramebuffers[i], NULL);
     }
     free(swapchainFramebuffers);
+
+    printf("Freeing command buffers\n");
+    u32 commandBufferCount = swapchainImageCount;
+    vkFreeCommandBuffers(
+        logicalDevice,
+        commandPool,
+        commandBufferCount,
+        commandBuffers
+    );
 
     printf("Shutting down graphics pipeline\n");
     vkDestroyPipeline(logicalDevice, graphicsPipeline, NULL);
@@ -1377,11 +1354,63 @@ void shutdownVulkan() {
     printf("Freeing image views memory\n");
     free(swapchainImageViews);
 
+    printf("Destroying swapchain");
+    vkDestroySwapchainKHR(logicalDevice, swapchain, NULL);
+
+}
+
+void recreateSwapchain() {
+    printf("[RUNTIME] Recreating swap chain\n");
+
+    // Wait till currently used resources are free to manage
+    vkDeviceWaitIdle(logicalDevice);
+
+    createSwapchain();
+    createImageViews();
+    createRenderPass();
+    createGraphicsPipeline();
+    createFramebuffers();
+    createCommandBuffers();
+}
+
+void initVulkan() {
+    printf("Initializing Vulkan\n");
+    createInstance();
+    // TODO: Setup debug message pipe
+    createSurface();
+    pickPhysicalDevice();
+    createLogicalDevice();
+    createSwapchain();
+    createImageViews();
+    createRenderPass();
+    createGraphicsPipeline();
+    createFramebuffers();
+    createCommandPool();
+    createCommandBuffers();
+    createSyncObjects();
+}
+
+void shutdownVulkan() {
+
+    shutdownSwapchain();
+
+    printf("Shutting down semaphores\n");
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], NULL);
+        vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], NULL);
+        vkDestroyFence(logicalDevice, inFlightFences[i], NULL);
+    }
+    free(renderFinishedSemaphores);
+    free(imageAvailableSemaphores);
+    free(inFlightFences);
+    
+    // TODO: Shutdown command buffers
+
+    printf("Shutting down command pool\n");
+    vkDestroyCommandPool(logicalDevice, commandPool, NULL);
+
     printf("Releasing swapchain images info\n");
     free(swapchainImages);
-
-    printf("Shutting down swapchain\n");
-    vkDestroySwapchainKHR(logicalDevice, swapchain, NULL);
 
     printf("Shutting down Vulkan\n");
     vkDestroyDevice(logicalDevice, NULL);
