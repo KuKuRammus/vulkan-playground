@@ -1401,7 +1401,7 @@ void shutdownVulkan() {
     }
 }
 
-void drawVulkanFrame() {
+void drawFrame() {
     // Wait for the frame to be finished
     vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, U64_MAX);
 
@@ -1515,7 +1515,7 @@ int main(int argc, const char **argv) {
         glfwPollEvents();
         
         f64 drawStartTime = glfwGetTime();
-        drawVulkanFrame();
+        drawFrame();
         f64 timeToDraw = glfwGetTime() - drawStartTime;
         printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/timeToDraw), timeToDraw);
     }
