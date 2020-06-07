@@ -78,6 +78,9 @@ VkCommandBuffer* commandBuffers;
 // Current frame index
 u32 currentFrame = 0;
 
+// Flag to handle resize explicitly
+u32 framebufferResized = QQ_FALSE;
+
 // Semaphores and fence
 VkFence* inFlightFences;
 VkFence* imagesInFlight;
@@ -155,7 +158,11 @@ VkExtent2D chooseSwapExtent(VkSurfaceCapabilitiesKHR capabilities) {
     if (capabilities.currentExtent.width != U32_MAX) {
         return capabilities.currentExtent;
     } else {
-        VkExtent2D actualExtent = {WINDOW_WIDTH, WINDOW_HEIGHT};
+        
+        u32 actualWidth, actualHeight;
+        glfwGetFramebufferSize(window, &actualWidth, &actualHeight);
+
+        VkExtent2D actualExtent = {actualWidth, actualHeight};
         actualExtent.width = max(
             capabilities.minImageExtent.width,
             min(
@@ -1362,6 +1369,15 @@ void shutdownSwapchain() {
 void recreateSwapchain() {
     printf("[RUNTIME] Recreating swap chain\n");
 
+    // Get window dimentions from glfw
+    u32 width;
+    u32 height;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(window, &width, &height);
+        glfwWaitEvents();
+    }
+
     // Wait till currently used resources are free to manage
     vkDeviceWaitIdle(logicalDevice);
 
@@ -1392,6 +1408,7 @@ void initVulkan() {
 
 void shutdownVulkan() {
 
+    // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
 
     printf("Shutting down semaphores\n");
@@ -1403,8 +1420,6 @@ void shutdownVulkan() {
     free(renderFinishedSemaphores);
     free(imageAvailableSemaphores);
     free(inFlightFences);
-    
-    // TODO: Shutdown command buffers
 
     printf("Shutting down command pool\n");
     vkDestroyCommandPool(logicalDevice, commandPool, NULL);
@@ -1434,7 +1449,7 @@ void drawFrame() {
 
     // Aquire image from swap chain
     u32 imageIndex;
-    vkAcquireNextImageKHR(
+    VkResult acquireResult = vkAcquireNextImageKHR(
         // Device and swap chain to aquire image from
         logicalDevice,
         swapchain,
@@ -1450,6 +1465,14 @@ void drawFrame() {
         // Available image index (in swaphChainImages)
         &imageIndex
     );
+
+    // Determine if swapchain needs to be recreated, based on result of image acquiring
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreateSwapchain();
+        return;
+    } else if (acquireResult != VK_SUCCESS) {
+        printf("Failed to acquire swap chain image!\n");
+    }
 
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(logicalDevice, 1, &imagesInFlight[imageIndex], VK_TRUE, U64_MAX);
@@ -1509,10 +1532,26 @@ void drawFrame() {
     };
 
     // Queue presentation
-    vkQueuePresentKHR(presentQueue, &presentInfo);
+    VkResult presentResult = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    // Recreate chain if image is suboptimal
+    if (
+        presentResult == VK_ERROR_OUT_OF_DATE_KHR
+        || presentResult == VK_SUBOPTIMAL_KHR
+        || framebufferResized != QQ_FALSE
+    ) {
+        framebufferResized = QQ_FALSE;
+        recreateSwapchain();
+    } else if (presentResult != VK_SUCCESS) {
+        printf("[ERROR] Failed to present swap chain data\n");
+    }
 
     // Update current frame sepahore index
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    framebufferResized = QQ_TRUE;
 }
 
 int main(int argc, const char **argv) {
@@ -1522,7 +1561,7 @@ int main(int argc, const char **argv) {
 
     // Window hints
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     // Create GLFW window
     window = glfwCreateWindow(
@@ -1532,6 +1571,7 @@ int main(int argc, const char **argv) {
         NULL,
         NULL
     );
+    glfwSetFramebufferSizeCallback(window, &framebufferResizeCallback);
 
     // Init vulkan
     initVulkan();
