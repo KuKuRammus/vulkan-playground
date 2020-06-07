@@ -1,8 +1,6 @@
 // TODO: Move into CMAKE
 #define QQ_DEBUG
-
 #define GLFW_INCLUDE_VULKAN
-
 #include <GLFW/glfw3.h>
 
 // Standard library stuff
@@ -1178,7 +1176,7 @@ void createCommandBuffers() {
         commandBuffers
     );
     if (result != VK_SUCCESS) {
-        printf("[ERROR] Cannot allocate command buffers");
+        printf("[ERROR] Cannot allocate command buffers\n");
     }
 
     // Start buffer recording
@@ -1193,7 +1191,7 @@ void createCommandBuffers() {
             commandBuffers[i], &beginInfo
         );
         if (beginBufferResult != VK_SUCCESS) {
-            printf("[ERROR] Failed to begin command buffer");
+            printf("[ERROR] Failed to begin command buffer\n");
         }
 
         // Define clear color
