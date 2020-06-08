@@ -1221,61 +1221,141 @@ void createCommandPool() {
     }
 }
 
-void createVertexBuffers() {
-    printf("Creating vertex buffers\n");
+// Helper function to copy data between 2 buffers
+void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 
+    // Memory transfer operations are executed through command buffers
+    // So allocate temp command buffer
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = commandPool,
+        .commandBufferCount = 1
+    };
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+    // Immediately start recording commands
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+
+        // Only 1 time usage
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    // Record command for transfering contents of the buffer
+    VkBufferCopy copyRegion = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = size
+    };
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    // Stop recording
+    vkEndCommandBuffer(commandBuffer);
+
+    // Execute buffer
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &commandBuffer
+    };
+    // NOTE: Graphics queue are capable of handling transfer commands
+    //       however, it is also possible to use separate queue for that
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+
+    // Wait till command is processed
+    // It is also possible to use fence in this case, which allows to schedule
+    //      multiple transfers, and wait them to complete, which may results in
+    //      driver level automatic optimizations
+    vkQueueWaitIdle(graphicsQueue);
+
+    // Free temp buffer
+    vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
+}
+
+// Helper to create and allocate buffer(-s?)
+void createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer* buffer,
+    VkDeviceMemory* bufferMemory
+) {
+    // Create buffer
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-
-        // Specify buffer size
-        .size = sizeof(Vertex) * verticesCount,
-
-        // Specify buffer data purpose
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-
-        // Buffer sharing mode
+        .size = size,
+        .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
-    VkResult result = vkCreateBuffer(
-        logicalDevice,
-        &bufferInfo,
-        NULL,
-        &vertexBuffer
-    );
-    if (result != VK_SUCCESS) {
-        printf("[ERROR] Failed to create vertex buffer\n");
+    if (vkCreateBuffer(logicalDevice, &bufferInfo, NULL, buffer) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create buffer\n");
     }
 
-    // Buffer is created, however it doesn't have any memory assigned to it yet
-    // To do this, check what type of memory this buffer requires
+    // Get memory requirements for this type of buffer
     VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(logicalDevice, vertexBuffer, &memRequirements);
+    vkGetBufferMemoryRequirements(logicalDevice, *buffer, &memRequirements);
 
-    // Actually allocate the memory from most suitable source
+    // Allocate memory
     VkMemoryAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memRequirements.size,
-        .memoryTypeIndex = findMemoryType(
-            memRequirements.memoryTypeBits,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        )
+        .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
     };
-    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, &vertexBufferMemory) != VK_SUCCESS) {
-        printf("[ERROR] Failed to allocate vertex memory\n");
+    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, bufferMemory) != VK_SUCCESS) {
+        printf("[ERROR] Failed to allocate buffer memory\n");
     }
 
-    // Associate memory with buffer
-    vkBindBufferMemory(logicalDevice, vertexBuffer, vertexBufferMemory, 0);
+    // Bind buffer memory
+    vkBindBufferMemory(logicalDevice, *buffer, *bufferMemory, 0);
 
-    // Map buffer memory into CPU accessible memory
+}
+
+void createVertexBuffers() {
+    printf("Creating vertex buffers\n");
+
+    VkDeviceSize bufferSize = sizeof(Vertex) * verticesCount;
+
+    // Create staging (temp) buffer
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &stagingBuffer,
+        &stagingBufferMemory
+    );
+
+    // Map staging buffer memory into CPU accessible memory
     void* data;
-    vkMapMemory(logicalDevice, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+    vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
     // Copy data into mapped area
-    memcpy(data, verticies, bufferInfo.size);
+    memcpy(data, verticies, bufferSize);
     // Unmap memory
-    vkUnmapMemory(logicalDevice, vertexBufferMemory);
+    vkUnmapMemory(logicalDevice, stagingBufferMemory);
     // TODO: Driver may actualy not copy data to buffer straight away, read about that
+
+    // Create buffer using helper above
+    // Data will be copied into this buffer from temp buffer
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &vertexBuffer,
+        &vertexBufferMemory
+    );
+
+    // Copy data from staging(CPU accessible memory) to GPU buffer
+    copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+    // Clean temp buffer data
+    vkDestroyBuffer(logicalDevice, stagingBuffer, NULL);
+    vkFreeMemory(logicalDevice, stagingBufferMemory, NULL);
+
 }
 
 void createCommandBuffers() {
