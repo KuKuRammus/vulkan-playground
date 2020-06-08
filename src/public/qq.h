@@ -29,3 +29,38 @@ typedef uint64_t b64;
 #define QQ_TRUE 1
 #define QQ_FALSE 0
 
+// Vertex definitions
+typedef struct {
+    f32 position[2];
+    f32 color[3];
+} Vertex;
+
+// Shader code
+typedef struct {
+    u8* data;
+    i64 size;
+} VulkanShaderCode;
+
+// Vulkan swap chain properties
+typedef struct {
+    VkSurfaceCapabilitiesKHR capabilities;
+    
+    u32 formatCount; 
+    VkSurfaceFormatKHR* formats;
+    
+    u32 presentModeCount;
+    VkPresentModeKHR* presentModes;
+} SwapchainSupportDetails;
+
+// Vulkan queue families
+typedef struct {
+    // Graphics
+    b32 isGraphicsSet;
+    u32 graphics;
+
+    // Presentation
+    b32 isPresentSet;
+    u32 present;
+} QueueFamilyIndices;
+
+

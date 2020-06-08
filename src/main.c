@@ -72,6 +72,10 @@ VkFramebuffer* swapchainFramebuffers;
 // Command pool
 VkCommandPool commandPool;
 
+// Vertex buffer and memory for it
+VkBuffer vertexBuffer;
+VkDeviceMemory vertexBufferMemory;
+
 // Command buffers
 VkCommandBuffer* commandBuffers;
 
@@ -87,33 +91,6 @@ VkFence* imagesInFlight;
 VkSemaphore* imageAvailableSemaphores;
 VkSemaphore* renderFinishedSemaphores;
 
-typedef struct {
-    u8* data;
-    i64 size;
-} VulkanShaderCode;
-
-// Vulkan swap chain properties
-typedef struct {
-    VkSurfaceCapabilitiesKHR capabilities;
-    
-    u32 formatCount; 
-    VkSurfaceFormatKHR* formats;
-    
-    u32 presentModeCount;
-    VkPresentModeKHR* presentModes;
-} SwapchainSupportDetails;
-
-// Vulkan queue families
-typedef struct {
-    // Graphics
-    b32 isGraphicsSet;
-    u32 graphics;
-
-    // Presentation
-    b32 isPresentSet;
-    u32 present;
-} QueueFamilyIndices;
-
 // Required validation layers
 const char *requiredVulkanLayers[1] = { "VK_LAYER_KHRONOS_validation" };
 
@@ -123,7 +100,79 @@ const char *reqVulkanDeviceExtensions[1] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
+// Describe geometry
+u32 verticesCount = 3;
+Vertex verticies[3] = {
+    { {-0.5f, -0.4f}, {1.0f, 0.0f, 0.0f} },
+    { { 0.5f, -0.3f}, {0.0f, 1.0f, 0.0f} },
+    { {-0.1f,  0.5f}, {0.0f, 0.0f, 1.0f} }
+};
+
 // ------ END GLOBALS
+
+
+// ------ VERTEX HELPERS
+// All functions below are related to Vertex struct (ideally, methods in the class)
+VkVertexInputBindingDescription getVertexBindingDescription() {
+    VkVertexInputBindingDescription bindingDescription = {
+        // Positional index
+        .binding = 0,
+
+        // Distance between each entry
+        .stride = sizeof(Vertex),
+
+        // Move to the next data entry after each vertex
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
+
+    return bindingDescription;
+}
+
+VkVertexInputAttributeDescription* getVertexAttributeDescription() {
+    // TODO: Not sure if allocating memory here is a good idea
+    VkVertexInputAttributeDescription* attributeDescription = malloc(
+        2 * sizeof(VkVertexInputAttributeDescription)
+    );
+
+    // Provide position data location
+    attributeDescription[0].binding = 0;
+    attributeDescription[0].location = 0; // Location directive in shader
+    attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescription[0].offset = offsetof(Vertex, position);
+
+    // Provide color data location
+    attributeDescription[1].binding = 0;
+    attributeDescription[1].location = 1; // Location directive in shader
+    attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescription[1].offset = offsetof(Vertex, color);
+
+    return attributeDescription;
+}
+// ------ END VERTEX HELPERS
+
+
+// HELPER TO FIND SPECIFIC MEMORY TYPE
+u32 findMemoryType(u32 typeFilter, VkMemoryPropertyFlags properties) {
+    // Get list of memory properties
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+    // Find memory which is suitable for the buffer
+    for (u32 i = 0; i < memProperties.memoryTypeCount; i++) {
+        if (
+            // Check if corresponding bit is set to 1
+            (typeFilter & (1 << i))
+
+            // Ensure have required property support (O_o)
+            && (memProperties.memoryTypes[i].propertyFlags & properties) == properties
+        ) {
+            return i;
+        }
+    }
+
+    printf("[ERROR] Failed to find suitable memory type\n");
+    return 0;
+}
 
 // Fetches best suface format
 VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHR* formats, u32 count) {
@@ -849,13 +898,20 @@ void createGraphicsPipeline() {
     };
 
     // Describe vertex data format
-    // Because now data is hardcoded into shader, don't pass data to it
+    VkVertexInputBindingDescription bindingDescription = getVertexBindingDescription();
+    u32 bindingDescriptionCount = 1;
+    u32 vertexAttrDescriptionCount = 2;
+
+    VkVertexInputAttributeDescription* attributeDescriptions = getVertexAttributeDescription();
+    
     VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 0,
-        .pVertexBindingDescriptions = NULL,
-        .vertexAttributeDescriptionCount = 0,
-        .pVertexAttributeDescriptions = NULL
+        // TODO: This is HARDCODED!!!1 BIG OOOF!1
+        .vertexBindingDescriptionCount = bindingDescriptionCount,
+        .pVertexBindingDescriptions = &bindingDescription, 
+        // TODO: This is HARDCODED!!!1 BIG OOOF!1
+        .vertexAttributeDescriptionCount = vertexAttrDescriptionCount,
+        .pVertexAttributeDescriptions = attributeDescriptions
     };
 
     // Describe what kind of geometry to draw from provided vertices
@@ -1019,6 +1075,9 @@ void createGraphicsPipeline() {
     // Free loaded shader memory
     unloadShaderCode(vertShaderCode);
     unloadShaderCode(fragShaderCode);
+
+    // Free vertex attribute description info
+    free(attributeDescriptions);
 }
 
 void createRenderPass() {
@@ -1162,6 +1221,63 @@ void createCommandPool() {
     }
 }
 
+void createVertexBuffers() {
+    printf("Creating vertex buffers\n");
+
+    VkBufferCreateInfo bufferInfo = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+
+        // Specify buffer size
+        .size = sizeof(Vertex) * verticesCount,
+
+        // Specify buffer data purpose
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+
+        // Buffer sharing mode
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+
+    VkResult result = vkCreateBuffer(
+        logicalDevice,
+        &bufferInfo,
+        NULL,
+        &vertexBuffer
+    );
+    if (result != VK_SUCCESS) {
+        printf("[ERROR] Failed to create vertex buffer\n");
+    }
+
+    // Buffer is created, however it doesn't have any memory assigned to it yet
+    // To do this, check what type of memory this buffer requires
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(logicalDevice, vertexBuffer, &memRequirements);
+
+    // Actually allocate the memory from most suitable source
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = findMemoryType(
+            memRequirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        )
+    };
+    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, &vertexBufferMemory) != VK_SUCCESS) {
+        printf("[ERROR] Failed to allocate vertex memory\n");
+    }
+
+    // Associate memory with buffer
+    vkBindBufferMemory(logicalDevice, vertexBuffer, vertexBufferMemory, 0);
+
+    // Map buffer memory into CPU accessible memory
+    void* data;
+    vkMapMemory(logicalDevice, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+    // Copy data into mapped area
+    memcpy(data, verticies, bufferInfo.size);
+    // Unmap memory
+    vkUnmapMemory(logicalDevice, vertexBufferMemory);
+    // TODO: Driver may actualy not copy data to buffer straight away, read about that
+}
+
 void createCommandBuffers() {
     printf("Creating command buffer\n");
 
@@ -1229,12 +1345,17 @@ void createCommandBuffers() {
             graphicsPipeline
         );
 
+        // Attach vertex buffers
+        VkBuffer vertexBuffers[] = {vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+
         // FOKEN DRAAAAAWWW!!!
         vkCmdDraw(
             commandBuffers[i],
             
             // Vertex count
-            3,
+            verticesCount,
 
             // Instance count
             1,
@@ -1402,6 +1523,7 @@ void initVulkan() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createVertexBuffers();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -1410,6 +1532,12 @@ void shutdownVulkan() {
 
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
+
+    printf("Shutting down vertex buffer\n");
+    vkDestroyBuffer(logicalDevice, vertexBuffer, NULL);
+
+    printf("Freeing buffer memory\n");
+    vkFreeMemory(logicalDevice, vertexBufferMemory, NULL);
 
     printf("Shutting down semaphores\n");
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
