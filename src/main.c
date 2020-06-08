@@ -1300,6 +1300,11 @@ void createBuffer(
     vkGetBufferMemoryRequirements(logicalDevice, *buffer, &memRequirements);
 
     // Allocate memory
+    // NOTE:
+    //      In real application, DO NOT CALL `vkAllocateMemory` for every buffer
+    //      because it is easy to hit GPU limit on maximum allowed buffer allocs.
+    //      Proper way would be to create single allocation, and use this memory
+    //      by providing `offset` value
     VkMemoryAllocateInfo allocInfo = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memRequirements.size,
