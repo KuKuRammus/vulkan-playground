@@ -76,6 +76,10 @@ VkCommandPool commandPool;
 VkBuffer vertexBuffer;
 VkDeviceMemory vertexBufferMemory;
 
+// Index buffer and memory for it
+VkBuffer indexBuffer;
+VkDeviceMemory indexBufferMemory;
+
 // Command buffers
 VkCommandBuffer* commandBuffers;
 
@@ -100,12 +104,25 @@ const char *reqVulkanDeviceExtensions[1] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-// Describe geometry
-u32 verticesCount = 3;
-Vertex verticies[3] = {
-    { {-0.5f, -0.4f}, {1.0f, 0.0f, 0.0f} },
+// Describe verticies (unique points of mesh)
+u32 verticesCount = 6;
+Vertex verticies[6] = {
+    { {-0.5f, -0.6f}, {1.0f, 0.0f, 0.0f} },
     { { 0.5f, -0.3f}, {0.0f, 1.0f, 0.0f} },
-    { {-0.1f,  0.5f}, {0.0f, 0.0f, 1.0f} }
+    { { 0.5f,  0.3f}, {0.0f, 0.0f, 1.0f} },
+    { {-0.5f,  0.6f}, {0.5f, 0.5f, 0.5f} },
+    { {-0.9f,  0.0f}, {0.6f, 1.0f, 0.1f} },
+    { { 0.9f,  0.0f}, {0.5f, 0.0f, 0.9f} }
+};
+
+// Describe indices (groups of verticies indexes)
+u32 indicesCount = 12;
+u32 indices[12] = {
+    0, 1, 2, // Triangle 1
+    2, 3, 0, // Triangle 2
+    4, 0, 3, // Triangle 3
+    1, 5, 2  // Tringle 4
+
 };
 
 // ------ END GLOBALS
@@ -1319,7 +1336,7 @@ void createBuffer(
 
 }
 
-void createVertexBuffers() {
+void createVertexBuffer() {
     printf("Creating vertex buffers\n");
 
     VkDeviceSize bufferSize = sizeof(Vertex) * verticesCount;
@@ -1363,6 +1380,46 @@ void createVertexBuffers() {
 
 }
 
+void createIndexBuffer() {
+    printf("Creating index buffer\n");
+
+    VkDeviceSize bufferSize = sizeof(indices[0]) * indicesCount;
+
+    // Create temp buffer
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &stagingBuffer,
+        &stagingBufferMemory
+    );
+
+    // Copy to temp buffer
+    void* data;
+    vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, indices, bufferSize);
+    vkUnmapMemory(logicalDevice, stagingBufferMemory);
+
+    // Create optimized storage buffer
+    createBuffer(
+        bufferSize,
+        // Using ..._INDEX_BUFFER_BIT this time
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &indexBuffer,
+        &indexBufferMemory
+    );
+
+    // Copy from temp to optimized(GPU)
+    copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
+    // Free temp buffer
+    vkDestroyBuffer(logicalDevice, stagingBuffer, NULL);
+    vkFreeMemory(logicalDevice, stagingBufferMemory, NULL);
+}
+
 void createCommandBuffers() {
     printf("Creating command buffer\n");
 
@@ -1403,7 +1460,7 @@ void createCommandBuffers() {
         }
 
         // Define clear color
-        VkClearValue clearColor = {0.0f,0.0f,0.0f,1.0f};
+        VkClearValue clearColor = {0.05f,0.05f,0.05f,1.0f};
 
         // Start render pass
         VkRenderPassBeginInfo renderPassInfo = {
@@ -1435,20 +1492,26 @@ void createCommandBuffers() {
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
 
-        // FOKEN DRAAAAAWWW!!!
-        vkCmdDraw(
+        // Attach index buffers
+        vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        // Draw using attached vertex and index buffers
+        vkCmdDrawIndexed(
             commandBuffers[i],
             
             // Vertex count
-            verticesCount,
+            indicesCount,
 
             // Instance count
             1,
 
-            // First vertex
+            // First index in index buffer
             0,
             
-            // First instance
+            // Offset between indices
+            0,
+
+            // Instancing offset (not used)
             0
         );
 
@@ -1608,7 +1671,8 @@ void initVulkan() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
-    createVertexBuffers();
+    createVertexBuffer();
+    createIndexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -1618,10 +1682,12 @@ void shutdownVulkan() {
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
 
+    printf("Shutting down index buffer\n");
+    vkDestroyBuffer(logicalDevice, indexBuffer, NULL);
+    vkFreeMemory(logicalDevice, indexBufferMemory, NULL);
+
     printf("Shutting down vertex buffer\n");
     vkDestroyBuffer(logicalDevice, vertexBuffer, NULL);
-
-    printf("Freeing buffer memory\n");
     vkFreeMemory(logicalDevice, vertexBufferMemory, NULL);
 
     printf("Shutting down semaphores\n");
