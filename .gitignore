@@ -17,6 +17,10 @@ CTestTestfile.cmake
 _deps
 *-prefix/
 
+# CPack
+CPackConfig.cmake
+CPackSourceConfig.cmake
+
 # Output directory
 output
 

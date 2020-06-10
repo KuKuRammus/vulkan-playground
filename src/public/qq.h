@@ -1,5 +1,9 @@
 #pragma once
 
+// Math
+#include <cglm/vec2.h>
+#include <cglm/vec3.h>
+
 // Custom primitive types definitions
 #include <stdint.h>
 
@@ -29,10 +33,10 @@ typedef uint64_t b64;
 #define QQ_TRUE 1
 #define QQ_FALSE 0
 
-// Vertex definitions
+// New vertex implementation
 typedef struct {
-    f32 position[2];
-    f32 color[3];
+    vec2 position;
+    vec3 color;
 } Vertex;
 
 // Shader code

@@ -26,3 +26,7 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("./dependencies/glfw")
 target_link_libraries(qq glfw)
 
+# CGLM
+add_subdirectory("./dependencies/cglm")
+target_link_libraries(qq cglm)
+

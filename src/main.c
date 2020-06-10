@@ -3,6 +3,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+// Math
+#include <cglm/vec2.h>
+
 // Standard library stuff
 #include <stdlib.h>
 #include <stdio.h>
