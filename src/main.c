@@ -5,6 +5,10 @@
 
 // Math
 #include <cglm/vec2.h>
+#include <cglm/vec3.h>
+#include <cglm/mat4.h>
+#include <cglm/affine.h>
+#include <cglm/cam.h>
 
 // Standard library stuff
 #include <stdlib.h>
@@ -38,6 +42,9 @@ const b32 debugModeEnabled = QQ_FALSE;
 // GLOBALS
 // TODO: Put into structure
 
+// Program start time
+f64 frameDeltaTime = 0.0f;
+
 // GLFW window
 GLFWwindow *window;
 
@@ -62,6 +69,9 @@ VkImageView* swapchainImageViews;
 // Rendering surface
 VkSurfaceKHR surface;
 
+// Descriptor set layout
+VkDescriptorSetLayout descriptorSetLayout;
+
 // Rendering pass and pipeline layout
 VkRenderPass renderPass;
 VkPipelineLayout pipelineLayout;
@@ -82,6 +92,14 @@ VkDeviceMemory vertexBufferMemory;
 // Index buffer and memory for it
 VkBuffer indexBuffer;
 VkDeviceMemory indexBufferMemory;
+
+// Descriptor pool
+VkDescriptorPool descriptorPool;
+VkDescriptorSet* descriptorSets;
+
+// Uniform buffers
+VkBuffer* uniformBuffers;
+VkDeviceMemory* uniformBuffersMemory;
 
 // Command buffers
 VkCommandBuffer* commandBuffers;
@@ -883,6 +901,53 @@ VkShaderModule createVulkanShaderModule(VulkanShaderCode code) {
     return shaderModule;
 }
 
+/**
+ * Descriptor is a way for shaders to freely access resources like buffer or images
+ *
+ * Descriptor layout specifies types of resources that are going to be accessed by
+ * pipeline, just like render pass specifies the types of attachments
+ * that will be accessed.
+ *
+ * Descriptor set specifies the actual buffer or image resources that
+ * will be bound to the descriptors
+ */
+void createDescriptorSetLayout() {
+    printf("Creating descriptor set layout\n");
+
+    VkDescriptorSetLayoutBinding uboLayoutBinding = {
+        // Binding, used in the shader
+        .binding = 0,
+
+        // Type of the descriptor
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+
+        // It is possible to pass an array, so we need to specify count manually
+        // Passing multiple might be useful for skeletal animation
+        .descriptorCount = 1,
+
+        // Which stages will access this descriptor
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+
+        // Only relevant for image descriptors
+        .pImmutableSamplers = NULL
+    };
+
+    // All descriptor binding are combined into DescriptorSetLayout
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &uboLayoutBinding
+    };
+    if (vkCreateDescriptorSetLayout(
+        logicalDevice,
+        &layoutInfo,
+        NULL,
+        &descriptorSetLayout
+    ) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create descriptor set layout\n");
+    }
+}
+
 void createGraphicsPipeline() {
     printf("Creating graphics pipeline\n");
 
@@ -894,8 +959,8 @@ void createGraphicsPipeline() {
     VkShaderModule vertShaderModule = createVulkanShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createVulkanShaderModule(fragShaderCode);
 
-    printf("Assigning shaders to pipeline states\n");
     // Vertex shader
+    printf("Assigning shaders to pipeline states\n");
     VkPipelineShaderStageCreateInfo vertShaderStageInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_VERTEX_BIT,
@@ -904,6 +969,7 @@ void createGraphicsPipeline() {
     };
 
     // Fragment shader
+    printf("Frag shader stage create info\n");
     VkPipelineShaderStageCreateInfo fragShaderStageInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -912,12 +978,14 @@ void createGraphicsPipeline() {
     };
 
     // Declare pipeline as an array
+    printf("Shader stage create info\n");
     VkPipelineShaderStageCreateInfo shaderStages[] = {
         vertShaderStageInfo,
         fragShaderStageInfo
     };
 
     // Describe vertex data format
+    printf("Binding vertex descriptors\n");
     VkVertexInputBindingDescription bindingDescription = getVertexBindingDescription();
     u32 bindingDescriptionCount = 1;
     u32 vertexAttrDescriptionCount = 2;
@@ -976,7 +1044,7 @@ void createGraphicsPipeline() {
         .polygonMode = VK_POLYGON_MODE_FILL,
         .lineWidth = 1.0f,
         .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable = VK_FALSE,
         .depthBiasConstantFactor = 0.0f,
         .depthBiasClamp = 0.0f,
@@ -1031,12 +1099,13 @@ void createGraphicsPipeline() {
     // Create pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 0,
-        .pSetLayouts = NULL,
+        .setLayoutCount = 1,
+        .pSetLayouts = &descriptorSetLayout,
         .pushConstantRangeCount = 0,
         .pPushConstantRanges = NULL
     };
 
+    printf("Creating pipeline layout\n");
     VkResult result = vkCreatePipelineLayout(
         logicalDevice,
         &pipelineLayoutInfo,
@@ -1423,6 +1492,45 @@ void createIndexBuffer() {
     vkFreeMemory(logicalDevice, stagingBufferMemory, NULL);
 }
 
+void createUniformBuffers() {
+    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+    // Allocate memory for buffers and device memory handlers
+    uniformBuffers = malloc(sizeof(VkBuffer) * swapchainImageCount);
+    uniformBuffersMemory = malloc(sizeof(VkDeviceMemory) * swapchainImageCount);
+
+    // Create buffers with memory
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &uniformBuffers[i],
+            &uniformBuffersMemory[i]
+        );
+    }
+}
+
+void createDescriptorPool() {
+    VkDescriptorPoolSize poolSize = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = swapchainImageCount
+    };
+
+    VkDescriptorPoolCreateInfo poolInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &poolSize,
+
+        // Maximum about of descriptors that can be allocated
+        .maxSets = swapchainImageCount
+    };
+
+    if (vkCreateDescriptorPool(logicalDevice, &poolInfo, NULL, &descriptorPool) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create descriptor pool\n");
+    }
+}
+
 void createCommandBuffers() {
     printf("Creating command buffer\n");
 
@@ -1497,6 +1605,18 @@ void createCommandBuffers() {
 
         // Attach index buffers
         vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        // Bind buffer
+        vkCmdBindDescriptorSets(
+            commandBuffers[i],
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayout,
+            0,
+            1,
+            &descriptorSets[i],
+            0,
+            NULL
+        );
 
         // Draw using attached vertex and index buffers
         vkCmdDrawIndexed(
@@ -1600,6 +1720,53 @@ void createSyncObjects() {
     }
 }
 
+void createDescriptorSets() {
+    VkDescriptorSetLayout* layouts = malloc(sizeof(VkDescriptorSetLayout) * swapchainImageCount);
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        layouts[i] = descriptorSetLayout;
+    }
+
+    VkDescriptorSetAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool,
+        .descriptorSetCount = swapchainImageCount,
+        .pSetLayouts = layouts
+    };
+
+    // Allocate memory for descriptor sets
+    descriptorSets = malloc(sizeof(VkDescriptorSet) * swapchainImageCount);
+    if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets) != VK_SUCCESS) {
+        printf("[ERROR] Failed to allocate descriptor sets\n");
+    }
+
+    // Free temp layouts memory
+    free(layouts);
+
+    // Configure descriptor sets
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        VkDescriptorBufferInfo bufferInfo = {
+            .buffer = uniformBuffers[i],
+            .offset = 0,
+            .range = sizeof(UniformBufferObject)
+        };
+
+        VkWriteDescriptorSet descriptorWrite = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSets[i],
+            .dstBinding = 0,
+            // Not using as array
+            .dstArrayElement = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &bufferInfo,
+            .pImageInfo = NULL,
+            .pTexelBufferView = NULL
+        };
+
+        vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, NULL);
+    }
+}
+
 void shutdownSwapchain() {
     printf("Shutting down framebuffers\n");
     for (u32 i = 0; i < swapchainImageCount; i++) {
@@ -1615,6 +1782,17 @@ void shutdownSwapchain() {
         commandBufferCount,
         commandBuffers
     );
+
+    printf("Freeing uniform buffers\n");
+    for (u32 i = 0; i < swapchainImageCount; i++) {
+        vkDestroyBuffer(logicalDevice, uniformBuffers[i], NULL);
+        vkFreeMemory(logicalDevice, uniformBuffersMemory[i], NULL);
+    }
+    free(uniformBuffers);
+    free(uniformBuffersMemory);
+
+    printf("Shutting down descriptor pool\n");
+    vkDestroyDescriptorPool(logicalDevice, descriptorPool, NULL);
 
     printf("Shutting down graphics pipeline\n");
     vkDestroyPipeline(logicalDevice, graphicsPipeline, NULL);
@@ -1658,8 +1836,12 @@ void recreateSwapchain() {
     createRenderPass();
     createGraphicsPipeline();
     createFramebuffers();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createCommandBuffers();
 }
+
 
 void initVulkan() {
     printf("Initializing Vulkan\n");
@@ -1671,11 +1853,15 @@ void initVulkan() {
     createSwapchain();
     createImageViews();
     createRenderPass();
+    createDescriptorSetLayout();
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
     createVertexBuffer();
     createIndexBuffer();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -1684,6 +1870,9 @@ void shutdownVulkan() {
 
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
+
+    printf("Shutting down descriptor set layout\n");
+    vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, NULL);
 
     printf("Shutting down index buffer\n");
     vkDestroyBuffer(logicalDevice, indexBuffer, NULL);
@@ -1725,6 +1914,48 @@ void shutdownVulkan() {
     }
 }
 
+void updateUniformBuffer(u32 currentImage) {
+    UniformBufferObject ubo = {};
+    
+
+    f64 rotationAngleRads = 0.174533f;
+    mat4 modelMatrix = GLM_MAT4_IDENTITY_INIT;
+    glm_rotate_z(
+        modelMatrix,
+        glfwGetTime() * rotationAngleRads,
+        ubo.model
+    );
+
+    vec3 eyeVector = {1.5f, 1.5f, 1.5f};
+    vec3 lookCenter = {0.0f, 0.0f, 0.0f};
+    vec3 lookUp = {0.0f, 0.0f, 1.0f};
+    glm_lookat(
+        eyeVector,
+        lookCenter,
+        lookUp,
+        ubo.view
+    );
+
+    f64 fieldOfViewRads = 0.785398f;
+    f64 projectionAspect = (f64)swapchainExtent.width / (f64)swapchainExtent.height;
+    glm_perspective(
+        fieldOfViewRads,
+        projectionAspect,
+        0.1f, // Near clipping plane
+        10.0f, // Far clipping plane
+        ubo.projection
+    );
+
+    ubo.projection[1][1] *= -1.0f;
+
+    // Copy data to current uniform buffer
+    void* data;
+    vkMapMemory(logicalDevice, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
+    memcpy(data, &ubo, sizeof(ubo));
+    vkUnmapMemory(logicalDevice, uniformBuffersMemory[currentImage]);
+
+}
+
 void drawFrame() {
     // Wait for the frame to be finished
     vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, U64_MAX);
@@ -1760,6 +1991,9 @@ void drawFrame() {
         vkWaitForFences(logicalDevice, 1, &imagesInFlight[imageIndex], VK_TRUE, U64_MAX);
     }
     imagesInFlight[imageIndex] = inFlightFences[currentFrame];
+
+    // Update uniform buffer for animation
+    updateUniformBuffer(imageIndex);
 
     // Submit command buffer
     VkSubmitInfo submitInfo = {};
@@ -1859,14 +2093,13 @@ int main(int argc, const char **argv) {
     initVulkan();
 
     // Main loop
-
+    f64 lastFrameTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        
-        f64 drawStartTime = glfwGetTime();
         drawFrame();
-        f64 timeToDraw = glfwGetTime() - drawStartTime;
-        printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/timeToDraw), timeToDraw);
+        frameDeltaTime = glfwGetTime() - lastFrameTime;
+        printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/frameDeltaTime), frameDeltaTime);
+        lastFrameTime = glfwGetTime();
     }
 
     // Wait till device finished

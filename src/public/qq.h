@@ -3,6 +3,7 @@
 // Math
 #include <cglm/vec2.h>
 #include <cglm/vec3.h>
+#include <cglm/mat4.h>
 
 // Custom primitive types definitions
 #include <stdint.h>
@@ -32,6 +33,13 @@ typedef uint64_t b64;
 // Project-scope boolean values
 #define QQ_TRUE 1
 #define QQ_FALSE 0
+
+// Descriptor - UniformBufferObject (UBO)
+typedef struct {
+    mat4 model;
+    mat4 view;
+    mat4 projection;
+} UniformBufferObject;
 
 // New vertex implementation
 typedef struct {
