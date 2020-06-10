@@ -126,24 +126,33 @@ const char *reqVulkanDeviceExtensions[1] = {
 };
 
 // Describe verticies (unique points of mesh)
-u32 verticesCount = 6;
-Vertex verticies[6] = {
-    { {-0.5f, -0.6f}, {1.0f, 0.0f, 0.0f} },
-    { { 0.5f, -0.3f}, {0.0f, 1.0f, 0.0f} },
-    { { 0.5f,  0.3f}, {0.0f, 0.0f, 1.0f} },
-    { {-0.5f,  0.6f}, {0.5f, 0.5f, 0.5f} },
-    { {-0.9f,  0.0f}, {0.6f, 1.0f, 0.1f} },
-    { { 0.9f,  0.0f}, {0.5f, 0.0f, 0.9f} }
+u32 verticesCount = 8;
+Vertex verticies[8] = {
+    { {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f} },
+    { {-1.0f, -1.0f,  1.0f}, {1.0f, 0.5f, 0.0f} },
+    { { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f} },
+    { { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f} },
+    { {-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f} },
+    { {-1.0f,  1.0f,  1.0f}, {0.3f, 0.0f, 0.5f} },
+    { { 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 0.0f} },
+    { { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 1.0f} },
 };
 
 // Describe indices (groups of verticies indexes)
-u32 indicesCount = 12;
-u32 indices[12] = {
-    0, 1, 2, // Triangle 1
-    2, 3, 0, // Triangle 2
-    4, 0, 3, // Triangle 3
-    1, 5, 2  // Tringle 4
-
+u32 indicesCount = 36;
+u32 indices[36] = {
+    3, 0, 1, // BACK
+    3, 1, 2,
+    0, 3, 7, // BOT
+    0, 7, 4,
+    0, 5, 1, // RIGHT
+    0, 4, 5,
+    3, 7, 6, // LEFT
+    3, 6, 2,
+    2, 6, 5, // TOP
+    2, 5, 1,
+    7, 4, 6, // FRONT
+    6, 4, 5
 };
 
 // ------ END GLOBALS
@@ -175,7 +184,7 @@ VkVertexInputAttributeDescription* getVertexAttributeDescription() {
     // Provide position data location
     attributeDescription[0].binding = 0;
     attributeDescription[0].location = 0; // Location directive in shader
-    attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescription[0].offset = offsetof(Vertex, position);
 
     // Provide color data location
@@ -1811,7 +1820,7 @@ void shutdownSwapchain() {
     printf("Freeing image views memory\n");
     free(swapchainImageViews);
 
-    printf("Destroying swapchain");
+    printf("Destroying swapchain\n");
     vkDestroySwapchainKHR(logicalDevice, swapchain, NULL);
 
 }
@@ -1926,7 +1935,7 @@ void updateUniformBuffer(u32 currentImage) {
         ubo.model
     );
 
-    vec3 eyeVector = {1.5f, 1.5f, 1.5f};
+    vec3 eyeVector = {3.0f, 3.0f, 3.0f};
     vec3 lookCenter = {0.0f, 0.0f, 0.0f};
     vec3 lookUp = {0.0f, 0.0f, 1.0f};
     glm_lookat(

@@ -43,7 +43,7 @@ typedef struct {
 
 // New vertex implementation
 typedef struct {
-    vec2 position;
+    vec3 position;
     vec3 color;
 } Vertex;
 
