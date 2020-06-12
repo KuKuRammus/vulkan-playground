@@ -138,8 +138,8 @@ const char *reqVulkanDeviceExtensions[1] = {
 };
 
 // Describe verticies (unique points of mesh)
-u32 verticesCount = 8;
-Vertex verticies[8] = {
+u32 verticesCount = 12;
+Vertex verticies[12] = {
     { {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f}, {0.5f, 1.0f} }, // 0
     { {-1.0f, -1.0f,  1.0f}, {1.0f, 0.5f, 0.0f}, {0.5f, 0.75f} }, // 1
     { { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f}, {0.5f, 0.5f} }, // 2
@@ -148,11 +148,18 @@ Vertex verticies[8] = {
     { {-1.0f,  1.0f,  1.0f}, {0.3f, 0.0f, 0.5f}, {0.25f, 0.5f} }, // 5
     { { 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 0.0f}, {0.25f, 0.75f} }, // 6
     { { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.5f} }, // 7
+
+    // Occlusion test verticies below
+    {{-1.5f, -1.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}, // 8
+    {{1.5f, -1.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}}, // 9
+    {{1.5f, 1.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // 10
+    {{-1.5f, 1.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}} // 11
 };
 
 // Describe indices (groups of verticies indexes)
-u32 indicesCount = 36;
-u32 indices[36] = {
+u32 indicesCount = 42;
+u32 indices[42] = {
+    // Cube
     3, 0, 1, // BACK
     3, 1, 2,
     0, 3, 7, // BOT
@@ -164,7 +171,11 @@ u32 indices[36] = {
     2, 6, 5, // TOP
     2, 5, 1,
     7, 4, 6, // FRONT
-    6, 4, 5
+    6, 4, 5,
+    
+    // Occlusion triangles
+    8, 9, 10,
+    10, 11, 8,
 };
 
 // ------ END GLOBALS
