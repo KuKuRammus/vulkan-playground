@@ -30,3 +30,6 @@ target_link_libraries(qq glfw)
 add_subdirectory("./dependencies/cglm")
 target_link_libraries(qq cglm)
 
+# Add STB include directories
+target_include_directories(qq PUBLIC "./dependencies/stb")
+

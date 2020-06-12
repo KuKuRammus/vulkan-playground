@@ -8,3 +8,7 @@ git clone -b 3.3-stable git@github.com:glfw/glfw.git glfw
 echo "Fetching - cglm"
 git clone -b master git@github.com:recp/cglm.git cglm
 
+# Clone stb
+echo "Fething STB libraries"
+git clone -b master git@github.com:nothings/stb.git stb
+

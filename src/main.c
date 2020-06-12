@@ -3,6 +3,10 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+// Image loading by STB library
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // Math
 #include <cglm/vec2.h>
 #include <cglm/vec3.h>
