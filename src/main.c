@@ -112,6 +112,9 @@ VkCommandBuffer* commandBuffers;
 VkImage textureImage;
 VkDeviceMemory textureImageMemory;
 
+// Texture image view
+VkImageView textureImageView;
+
 // Current frame index
 u32 currentFrame = 0;
 
@@ -965,6 +968,30 @@ void createSurface() {
     }
 }
 
+// Helper to create vulkan image view
+VkImageView createImageView(VkImage image, VkFormat format) {
+    VkImageViewCreateInfo viewInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    VkImageView imageView;
+    if (vkCreateImageView(logicalDevice, &viewInfo, NULL, &imageView) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create image view\n");
+    }
+
+    return imageView;
+}
+
 void createImageViews() {
     printf("Creating swap chain image views");
 
@@ -974,45 +1001,10 @@ void createImageViews() {
 
     // Create image views
     for (u32 i = 0; i < swapchainImageCount; i++) {
-        VkImageViewCreateInfo createInfo = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchainImages[i],
-
-            // Define how image should be interpreted and it's format
-            // in this case: 2d image with default image format
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = swapchainImageFormat,
-
-            // Set default values for all color channels
-            .components = {
-                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .a = VK_COMPONENT_SWIZZLE_IDENTITY
-            },
-            
-            // Define image purpose and what parts should be accessed
-            // In this case: color target without mipmaps and multiple layers
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            }
-        };
-
-        // Create image
-        if (
-            vkCreateImageView(
-                logicalDevice,
-                &createInfo,
-                NULL,
-                &swapchainImageViews[i]
-            ) != VK_SUCCESS
-        ) {
-            printf("[ERR] Failed to create image view of index %d", i);
-        }
+        swapchainImageViews[i] = createImageView(
+            swapchainImages[i],
+            swapchainImageFormat
+        );
     }
 }
 
@@ -1660,6 +1652,11 @@ void createTextureImage() {
     vkFreeMemory(logicalDevice, stagingBufferMemory, NULL);
 }
 
+void createTextureImageView() {
+    printf("Creating texture image view\n");
+    textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+}
+
 // Helper function to copy data between 2 buffers
 void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 
@@ -2131,6 +2128,7 @@ void initVulkan() {
     createFramebuffers();
     createCommandPool();
     createTextureImage();
+    createTextureImageView();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -2144,6 +2142,9 @@ void shutdownVulkan() {
 
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
+
+    printf("Shutting down loaded image texture view\n");
+    vkDestroyImageView(logicalDevice, textureImageView, NULL);
 
     printf("Shutting down loaded image texture\n");
     vkDestroyImage(logicalDevice, textureImage, NULL);
