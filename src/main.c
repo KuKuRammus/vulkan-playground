@@ -108,6 +108,10 @@ VkDeviceMemory* uniformBuffersMemory;
 // Command buffers
 VkCommandBuffer* commandBuffers;
 
+// Loaded image handle and memory
+VkImage textureImage;
+VkDeviceMemory textureImageMemory;
+
 // Current frame index
 u32 currentFrame = 0;
 
@@ -201,6 +205,44 @@ VkVertexInputAttributeDescription* getVertexAttributeDescription() {
 }
 // ------ END VERTEX HELPERS
 
+// Helper to create command buffer and start recoring
+VkCommandBuffer beginSingleTimeCommands() {
+    VkCommandBufferAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = commandPool,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+    // Begin buffer recording
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    return commandBuffer;
+}
+
+// Helper to stop recording of single time buffer
+void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &commandBuffer
+    };
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
+}
+
 
 // HELPER TO FIND SPECIFIC MEMORY TYPE
 u32 findMemoryType(u32 typeFilter, VkMemoryPropertyFlags properties) {
@@ -224,6 +266,117 @@ u32 findMemoryType(u32 typeFilter, VkMemoryPropertyFlags properties) {
     printf("[ERROR] Failed to find suitable memory type\n");
     return 0;
 }
+
+// Helper to create and allocate buffer(-s?)
+void createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer* buffer,
+    VkDeviceMemory* bufferMemory
+) {
+    // Create buffer
+    VkBufferCreateInfo bufferInfo = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+
+    if (vkCreateBuffer(logicalDevice, &bufferInfo, NULL, buffer) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create buffer\n");
+    }
+
+    // Get memory requirements for this type of buffer
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(logicalDevice, *buffer, &memRequirements);
+
+    // Allocate memory
+    // NOTE:
+    //      In real application, DO NOT CALL `vkAllocateMemory` for every buffer
+    //      because it is easy to hit GPU limit on maximum allowed buffer allocs.
+    //      Proper way would be to create single allocation, and use this memory
+    //      by providing `offset` value
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
+    };
+    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, bufferMemory) != VK_SUCCESS) {
+        printf("[ERROR] Failed to allocate buffer memory\n");
+    }
+
+    // Bind buffer memory
+    vkBindBufferMemory(logicalDevice, *buffer, *bufferMemory, 0);
+
+}
+
+// Helper for creating image
+void createImage(
+    u32 width,
+    u32 height,
+    VkFormat format,
+    VkImageTiling tiling,
+    VkImageUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkImage* image,
+    VkDeviceMemory* imageMemory
+) {
+    // Create vulkan texture image
+    VkImageCreateInfo imageInfo = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .extent = {
+            .width = width,
+            .height = height,
+            .depth = 1
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+
+        // Image format
+        .format = format,
+
+        // Image tiling (let driver pick in this case)
+        .tiling = tiling,
+
+        // Not usable by GPU, first transition will discard the texels
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+
+        // Image used as a destination, and can be accessed from shaders
+        .usage = usage,
+
+        // Image will be only used by 1 queue family
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+
+        // Not using multisampling for now
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .flags = 0
+    };
+
+    if (vkCreateImage(logicalDevice, &imageInfo, NULL, image) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create image\n");
+    }
+
+    // Get requirements and allocate memory for the image
+    VkMemoryRequirements memRequirements;
+    vkGetImageMemoryRequirements(logicalDevice, *image, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = findMemoryType(
+            memRequirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        )
+    };
+    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, imageMemory) != VK_SUCCESS) {
+        printf("[ERROR] Failed to allocate memory for the image");
+    }
+
+    vkBindImageMemory(logicalDevice, *image, *imageMemory, 0);
+}
+
 
 // Fetches best suface format
 VkSurfaceFormatKHR chooseSwapSurfaceFormat(VkSurfaceFormatKHR* formats, u32 count) {
@@ -1339,6 +1492,39 @@ void createTextureImage() {
     if (!pixels) {
         printf("[ERROR] Failed to load texture image");
     }
+
+    // Prepare to load into optimized buffer
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(
+        imageSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &stagingBuffer,
+        &stagingBufferMemory
+    );
+
+    // Copy to staging buffer
+    void* data;
+    vkMapMemory(logicalDevice, stagingBufferMemory, 0, imageSize, 0, &data);
+    memcpy(data, pixels, imageSize);
+    vkUnmapMemory(logicalDevice, stagingBufferMemory);
+
+    // Free stb image buffer
+    stbi_image_free(pixels);
+
+    // Create image via helper
+    createImage(
+        textureWidth,
+        textureHeight,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &textureImage,
+        &textureImageMemory
+    );
+
 }
 
 // Helper function to copy data between 2 buffers
@@ -1346,23 +1532,7 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 
     // Memory transfer operations are executed through command buffers
     // So allocate temp command buffer
-    VkCommandBufferAllocateInfo allocInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandPool = commandPool,
-        .commandBufferCount = 1
-    };
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
-
-    // Immediately start recording commands
-    VkCommandBufferBeginInfo beginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-
-        // Only 1 time usage
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
     // Record command for transfering contents of the buffer
     VkBufferCopy copyRegion = {
@@ -1373,71 +1543,9 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
     // Stop recording
-    vkEndCommandBuffer(commandBuffer);
-
-    // Execute buffer
-    VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &commandBuffer
-    };
-    // NOTE: Graphics queue are capable of handling transfer commands
-    //       however, it is also possible to use separate queue for that
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-
-    // Wait till command is processed
-    // It is also possible to use fence in this case, which allows to schedule
-    //      multiple transfers, and wait them to complete, which may results in
-    //      driver level automatic optimizations
-    vkQueueWaitIdle(graphicsQueue);
-
-    // Free temp buffer
-    vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
+    endSingleTimeCommands(commandBuffer);
 }
 
-// Helper to create and allocate buffer(-s?)
-void createBuffer(
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties,
-    VkBuffer* buffer,
-    VkDeviceMemory* bufferMemory
-) {
-    // Create buffer
-    VkBufferCreateInfo bufferInfo = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-
-    if (vkCreateBuffer(logicalDevice, &bufferInfo, NULL, buffer) != VK_SUCCESS) {
-        printf("[ERROR] Failed to create buffer\n");
-    }
-
-    // Get memory requirements for this type of buffer
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(logicalDevice, *buffer, &memRequirements);
-
-    // Allocate memory
-    // NOTE:
-    //      In real application, DO NOT CALL `vkAllocateMemory` for every buffer
-    //      because it is easy to hit GPU limit on maximum allowed buffer allocs.
-    //      Proper way would be to create single allocation, and use this memory
-    //      by providing `offset` value
-    VkMemoryAllocateInfo allocInfo = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = memRequirements.size,
-        .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
-    };
-    if (vkAllocateMemory(logicalDevice, &allocInfo, NULL, bufferMemory) != VK_SUCCESS) {
-        printf("[ERROR] Failed to allocate buffer memory\n");
-    }
-
-    // Bind buffer memory
-    vkBindBufferMemory(logicalDevice, *buffer, *bufferMemory, 0);
-
-}
 
 void createVertexBuffer() {
     printf("Creating vertex buffers\n");
