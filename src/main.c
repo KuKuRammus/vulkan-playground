@@ -5,7 +5,7 @@
 
 // Image loading by STB library
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include <stb_image.h>
 
 // Math
 #include <cglm/vec2.h>
