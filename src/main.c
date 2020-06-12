@@ -1476,6 +1476,112 @@ void createCommandPool() {
     }
 }
 
+void transitionImageLayout(
+    VkImage image,
+    VkFormat format,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout
+) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+    // Create memory barrier to sync resource access
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+
+        // Not transferring family ownership
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+
+        // Specify image and part of the image
+        .image = image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        },
+
+        // Specify operations before and after the barrier
+        .srcAccessMask = 0,
+        .dstAccessMask = 0,
+    };
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if (
+        oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
+        && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    ) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (
+        oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    ) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        printf("Unsupported layout transition");
+    }
+
+    // Submit pipeline barrier
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage,
+        destinationStage,
+        0,
+        0,
+        NULL,
+        0,
+        NULL,
+        1,
+        &barrier
+    );
+
+    endSingleTimeCommands(commandBuffer);
+}
+
+// Helper to copy buffer to image
+void copyBufferToImage(VkBuffer buffer, VkImage image, u32 width, u32 height) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+    // Specify which part of the buffer will be copied to which part of the image
+    VkBufferImageCopy region = {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        },
+
+        .imageOffset = {0,0,0},
+        .imageExtent = {width, height, 1}
+    };
+
+    vkCmdCopyBufferToImage(
+        commandBuffer,
+        buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region
+    );
+
+    endSingleTimeCommands(commandBuffer);
+}
+
 void createTextureImage() {
     printf("Loading texture\n");
 
@@ -1525,6 +1631,33 @@ void createTextureImage() {
         &textureImageMemory
     );
 
+    // Transition to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    transitionImageLayout(
+        textureImage,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+
+    // Execute buffer to image copy operation
+    copyBufferToImage(
+        stagingBuffer,
+        textureImage,
+        textureWidth,
+        textureHeight
+    );
+
+    // Prepare image for reading from shader
+    transitionImageLayout(
+        textureImage,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    // Cleanup staging buffer
+    vkDestroyBuffer(logicalDevice, stagingBuffer, NULL);
+    vkFreeMemory(logicalDevice, stagingBufferMemory, NULL);
 }
 
 // Helper function to copy data between 2 buffers
@@ -1545,6 +1678,7 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     // Stop recording
     endSingleTimeCommands(commandBuffer);
 }
+
 
 
 void createVertexBuffer() {
@@ -2010,6 +2144,10 @@ void shutdownVulkan() {
 
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
+
+    printf("Shutting down loaded image texture\n");
+    vkDestroyImage(logicalDevice, textureImage, NULL);
+    vkFreeMemory(logicalDevice, textureImageMemory, NULL);
 
     printf("Shutting down descriptor set layout\n");
     vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, NULL);
