@@ -140,14 +140,14 @@ const char *reqVulkanDeviceExtensions[1] = {
 // Describe verticies (unique points of mesh)
 u32 verticesCount = 8;
 Vertex verticies[8] = {
-    { {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f} },
-    { {-1.0f, -1.0f,  1.0f}, {1.0f, 0.5f, 0.0f} },
-    { { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f} },
-    { { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f} },
-    { {-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f} },
-    { {-1.0f,  1.0f,  1.0f}, {0.3f, 0.0f, 0.5f} },
-    { { 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 0.0f} },
-    { { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 1.0f} },
+    { {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f}, {0.5f, 1.0f} }, // 0
+    { {-1.0f, -1.0f,  1.0f}, {1.0f, 0.5f, 0.0f}, {0.5f, 0.75f} }, // 1
+    { { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f}, {0.5f, 0.5f} }, // 2
+    { { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {0.5f, 0.25f} }, // 3
+    { {-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.75f} }, // 4
+    { {-1.0f,  1.0f,  1.0f}, {0.3f, 0.0f, 0.5f}, {0.25f, 0.5f} }, // 5
+    { { 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 0.0f}, {0.25f, 0.75f} }, // 6
+    { { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.5f} }, // 7
 };
 
 // Describe indices (groups of verticies indexes)
@@ -190,7 +190,7 @@ VkVertexInputBindingDescription getVertexBindingDescription() {
 VkVertexInputAttributeDescription* getVertexAttributeDescription() {
     // TODO: Not sure if allocating memory here is a good idea
     VkVertexInputAttributeDescription* attributeDescription = malloc(
-        2 * sizeof(VkVertexInputAttributeDescription)
+        3 * sizeof(VkVertexInputAttributeDescription)
     );
 
     // Provide position data location
@@ -204,6 +204,12 @@ VkVertexInputAttributeDescription* getVertexAttributeDescription() {
     attributeDescription[1].location = 1; // Location directive in shader
     attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescription[1].offset = offsetof(Vertex, color);
+
+    // Provide UV coordinates
+    attributeDescription[2].binding = 0;
+    attributeDescription[2].location = 2;
+    attributeDescription[2].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescription[2].offset = offsetof(Vertex, uv);
 
     return attributeDescription;
 }
@@ -1098,11 +1104,26 @@ void createDescriptorSetLayout() {
         .pImmutableSamplers = NULL
     };
 
+    VkDescriptorSetLayoutBinding samplerLayoutBinding = {
+        .binding = 1,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImmutableSamplers = NULL,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+
+    // List all layout bindings
+    u32 bindingCount = 2;
+    VkDescriptorSetLayoutBinding bindings[2] = {
+        uboLayoutBinding,
+        samplerLayoutBinding
+    };
+
     // All descriptor binding are combined into DescriptorSetLayout
     VkDescriptorSetLayoutCreateInfo layoutInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &uboLayoutBinding
+        .bindingCount = bindingCount,
+        .pBindings = bindings
     };
     if (vkCreateDescriptorSetLayout(
         logicalDevice,
@@ -1154,7 +1175,7 @@ void createGraphicsPipeline() {
     printf("Binding vertex descriptors\n");
     VkVertexInputBindingDescription bindingDescription = getVertexBindingDescription();
     u32 bindingDescriptionCount = 1;
-    u32 vertexAttrDescriptionCount = 2;
+    u32 vertexAttrDescriptionCount = 3;
 
     VkVertexInputAttributeDescription* attributeDescriptions = getVertexAttributeDescription();
     
@@ -1831,15 +1852,23 @@ void createUniformBuffers() {
 }
 
 void createDescriptorPool() {
-    VkDescriptorPoolSize poolSize = {
-        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = swapchainImageCount
+
+    u32 poolSizeCount = 2;
+    VkDescriptorPoolSize poolSizes[2] = {
+        {
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = swapchainImageCount
+        },
+        {
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = swapchainImageCount
+        }
     };
 
     VkDescriptorPoolCreateInfo poolInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &poolSize,
+        .poolSizeCount = poolSizeCount,
+        .pPoolSizes = poolSizes,
 
         // Maximum about of descriptors that can be allocated
         .maxSets = swapchainImageCount
@@ -2069,20 +2098,45 @@ void createDescriptorSets() {
             .range = sizeof(UniformBufferObject)
         };
 
-        VkWriteDescriptorSet descriptorWrite = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSets[i],
-            .dstBinding = 0,
-            // Not using as array
-            .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .pBufferInfo = &bufferInfo,
-            .pImageInfo = NULL,
-            .pTexelBufferView = NULL
+        VkDescriptorImageInfo imageInfo = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView = textureImageView,
+            .sampler = textureSampler
         };
 
-        vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, NULL);
+        u32 descriptorWriteCount = 2;
+        VkWriteDescriptorSet descriptorWrites[2] = {
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = descriptorSets[i],
+                .dstBinding = 0,
+                // Not using as array
+                .dstArrayElement = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .pBufferInfo = &bufferInfo,
+                .pImageInfo = NULL,
+                .pTexelBufferView = NULL
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = descriptorSets[i],
+                .dstBinding = 1,
+                // Not using as array
+                .dstArrayElement = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .pImageInfo = &imageInfo,
+            }
+        };
+
+        vkUpdateDescriptorSets(
+            logicalDevice,
+            descriptorWriteCount,
+            descriptorWrites,
+            0,
+            NULL
+        );
     }
 }
 
