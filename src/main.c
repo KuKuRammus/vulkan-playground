@@ -1323,6 +1323,24 @@ void createCommandPool() {
     }
 }
 
+void createTextureImage() {
+    printf("Loading texture\n");
+
+    u32 textureWidth, textureHeight, textureChannels;
+    stbi_uc* pixels = stbi_load(
+        "texture/animegrill.jpg",
+        &textureWidth,
+        &textureHeight,
+        &textureChannels,
+        STBI_rgb_alpha
+    );
+    VkDeviceSize imageSize = textureWidth * textureHeight * 4;
+
+    if (!pixels) {
+        printf("[ERROR] Failed to load texture image");
+    }
+}
+
 // Helper function to copy data between 2 buffers
 void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 
@@ -1870,6 +1888,7 @@ void initVulkan() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createTextureImage();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
