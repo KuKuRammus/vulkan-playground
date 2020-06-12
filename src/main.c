@@ -111,6 +111,7 @@ VkCommandBuffer* commandBuffers;
 // Loaded image handle and memory
 VkImage textureImage;
 VkDeviceMemory textureImageMemory;
+VkSampler textureSampler;
 
 // Texture image view
 VkImageView textureImageView;
@@ -687,7 +688,9 @@ void createLogicalDevice() {
 
     // Declare required device features (already checked for availability)
     // Empty for now
-    VkPhysicalDeviceFeatures deviceFeatures = {};
+    VkPhysicalDeviceFeatures deviceFeatures = {
+        .samplerAnisotropy = VK_TRUE
+    };
 
     // Create logical device
     VkDeviceCreateInfo createInfo = {
@@ -758,6 +761,11 @@ u32 rateVulkanPhysicalDevice(VkPhysicalDevice device) {
     VkPhysicalDeviceFeatures deviceFeatures;
     vkGetPhysicalDeviceProperties(device, &deviceProperties);
     vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+    // Anisotropy filter must be supported
+    if (!deviceFeatures.samplerAnisotropy) {
+        return 0;
+    }
 
     // All devices should support geometry shader
     if (!deviceFeatures.geometryShader) {
@@ -1657,6 +1665,47 @@ void createTextureImageView() {
     textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
 }
 
+void createTextureSampler() {
+    printf("Create texture sampler\n");
+
+    VkSamplerCreateInfo samplerInfo = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+
+        // U, V, W === X, Y, Z coordinates
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+
+        // Setup anisotropic filtering
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = 16.0f,
+
+        // Color returned when sampling beyond the image with
+        // "clamp to border" addressing mode
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+
+        // Flag is addressing should be in normalized coordinates
+        .unnormalizedCoordinates = VK_FALSE,
+
+        // If enabled, texels will be first compared to a value, and result
+        // of the comparison is used in filtering operation
+        .compareEnable = VK_FALSE,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+
+        // Setup mipmapping
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .mipLodBias = 0.0f,
+        .minLod = 0.0f,
+        .maxLod = 0.0f
+    };
+
+    if (vkCreateSampler(logicalDevice, &samplerInfo, NULL, &textureSampler) != VK_SUCCESS) {
+        printf("[ERROR] Failed to create texture sampler\n");
+    }
+}
+
 // Helper function to copy data between 2 buffers
 void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
 
@@ -2129,6 +2178,7 @@ void initVulkan() {
     createCommandPool();
     createTextureImage();
     createTextureImageView();
+    createTextureSampler();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -2142,6 +2192,9 @@ void shutdownVulkan() {
 
     // TODO: There is an errors, when resizing the window
     shutdownSwapchain();
+
+    printf("Shutting down sampler\n");
+    vkDestroySampler(logicalDevice, textureSampler, NULL);
 
     printf("Shutting down loaded image texture view\n");
     vkDestroyImageView(logicalDevice, textureImageView, NULL);
