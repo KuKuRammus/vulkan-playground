@@ -52,6 +52,11 @@ f64 frameDeltaTime = 0.0f;
 // GLFW window
 GLFWwindow *window;
 
+// Camera control vectors
+vec3 eyeVector = {3.0f, 3.0f, 3.0f};
+vec3 lookCenter = {0.0f, 0.0f, 0.0f};
+vec3 lookUp = {0.0f, 0.0f, 1.0f};
+
 // Vulkan info
 VkLayerProperties *layerProperties;
 VkInstance instance;
@@ -2323,9 +2328,9 @@ void updateUniformBuffer(u32 currentImage) {
         ubo.model
     );
 
-    vec3 eyeVector = {3.0f, 3.0f, 3.0f};
-    vec3 lookCenter = {0.0f, 0.0f, 0.0f};
-    vec3 lookUp = {0.0f, 0.0f, 1.0f};
+    // vec3 eyeVector = {3.0f, 3.0f, 3.0f};
+    // vec3 lookCenter = {0.0f, 0.0f, 0.0f};
+    // vec3 lookUp = {0.0f, 0.0f, 1.0f};
     glm_lookat(
         eyeVector,
         lookCenter,
@@ -2495,7 +2500,7 @@ int main(int argc, const char **argv) {
         glfwPollEvents();
         drawFrame();
         frameDeltaTime = glfwGetTime() - lastFrameTime;
-        printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/frameDeltaTime), frameDeltaTime);
+        // printf("[RENDER] %f FPS (took: %f sec)\n", (1.0f/frameDeltaTime), frameDeltaTime);
         lastFrameTime = glfwGetTime();
     }
 
