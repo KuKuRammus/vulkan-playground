@@ -43,6 +43,11 @@ const b32 debugModeEnabled = QQ_FALSE;
 
 #endif
 
+// MODEL RELATED STUFF
+#define MESH_MODEL_PATH "model/lizard_triangle.obj"
+#define MESH_TEXTURE_PATH "texture/lizard.png"
+
+
 // GLOBALS
 // TODO: Put into structure
 
@@ -53,9 +58,9 @@ f64 frameDeltaTime = 0.0f;
 GLFWwindow *window;
 
 // Camera control vectors
-vec3 eyeVector = {3.0f, 3.0f, 3.0f};
+vec3 eyeVector = {0.0f, 0.0f, 4.0f};
 vec3 lookCenter = {0.0f, 0.0f, 0.0f};
-vec3 lookUp = {0.0f, 0.0f, 1.0f};
+vec3 lookUp = {0.0f, 1.0f, 0.0f};
 
 // Vulkan info
 VkLayerProperties *layerProperties;
@@ -147,49 +152,17 @@ const char *reqVulkanDeviceExtensions[1] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-// Describe verticies (unique points of mesh)
-u32 verticesCount = 12;
-Vertex verticies[12] = {
-    { {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f}, {0.5f, 1.0f} }, // 0
-    { {-1.0f, -1.0f,  1.0f}, {1.0f, 0.5f, 0.0f}, {0.5f, 0.75f} }, // 1
-    { { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f}, {0.5f, 0.5f} }, // 2
-    { { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f}, {0.5f, 0.25f} }, // 3
-    { {-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.75f} }, // 4
-    { {-1.0f,  1.0f,  1.0f}, {0.3f, 0.0f, 0.5f}, {0.25f, 0.5f} }, // 5
-    { { 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 0.0f}, {0.25f, 0.75f} }, // 6
-    { { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.5f} }, // 7
+// LOADED MODEL RELATED STUFF
+u32 meshVertexCount = 0;
+Vertex* meshVertices = NULL;
 
-    // Occlusion test verticies below
-    {{-1.5f, -1.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}, // 8
-    {{1.5f, -1.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}}, // 9
-    {{1.5f, 1.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // 10
-    {{-1.5f, 1.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}} // 11
-};
+u32 meshIndexCount = 0;
+u32* meshIndices = NULL;
 
-// Describe indices (groups of verticies indexes)
-u32 indicesCount = 42;
-u32 indices[42] = {
-    // Cube
-    3, 0, 1, // BACK
-    3, 1, 2,
-    0, 3, 7, // BOT
-    0, 7, 4,
-    0, 5, 1, // RIGHT
-    0, 4, 5,
-    3, 7, 6, // LEFT
-    3, 6, 2,
-    2, 6, 5, // TOP
-    2, 5, 1,
-    7, 4, 6, // FRONT
-    6, 4, 5,
-    
-    // Occlusion triangles
-    8, 9, 10,
-    10, 11, 8,
-};
+VkBuffer meshVertexBuffer;
+VkDeviceMemory meshVertexBufferMemory;
 
 // ------ END GLOBALS
-
 
 // ------ VERTEX HELPERS
 // All functions below are related to Vertex struct (ideally, methods in the class)
@@ -359,6 +332,8 @@ void createBuffer(
     VkBuffer* buffer,
     VkDeviceMemory* bufferMemory
 ) {
+    printf("[LOG] Attempting to create buffer of size %d\n", size);
+
     // Create buffer
     VkBufferCreateInfo bufferInfo = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1622,40 +1597,18 @@ void transitionImageLayout(
 ) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
-    // Create memory barrier to sync resource access
-    VkImageMemoryBarrier barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .oldLayout = oldLayout,
-        .newLayout = newLayout,
-
-        // Not transferring family ownership
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-
-        // Specify image and part of the image
-        .image = image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1
-        },
-
-        // Specify operations before and after the barrier
-        .srcAccessMask = 0,
-        .dstAccessMask = 0,
-    };
-
-    if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-        if (hasStencilComponent(format)) {
-            barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-        }
-    } else {
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    }
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
 
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;
@@ -1666,7 +1619,8 @@ void transitionImageLayout(
     ) {
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     } else if (
         oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
@@ -1674,35 +1628,20 @@ void transitionImageLayout(
     ) {
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else if (
-        oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
-        && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-    ) {
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = (
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-        );
-        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     } else {
-        printf("Unsupported layout transition");
+        printf("[ERROR] Unsupported image transition");
     }
 
-    // Submit pipeline barrier
     vkCmdPipelineBarrier(
         commandBuffer,
-        sourceStage,
-        destinationStage,
+        sourceStage, destinationStage,
         0,
-        0,
-        NULL,
-        0,
-        NULL,
-        1,
-        &barrier
+        0, NULL,
+        0, NULL,
+        1, &barrier
     );
 
     endSingleTimeCommands(commandBuffer);
@@ -1727,13 +1666,6 @@ void createDepthResources() {
         depthImage,
         depthFormat,
         VK_IMAGE_ASPECT_DEPTH_BIT
-    );
-
-    transitionImageLayout(
-        depthImage,
-        depthFormat,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     );
 }
 
@@ -1775,7 +1707,7 @@ void createTextureImage() {
 
     u32 textureWidth, textureHeight, textureChannels;
     stbi_uc* pixels = stbi_load(
-        "texture/animegrill.jpg",
+        MESH_TEXTURE_PATH,
         &textureWidth,
         &textureHeight,
         &textureChannels,
@@ -1917,12 +1849,186 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     endSingleTimeCommands(commandBuffer);
 }
 
+// Custom OBJ loader
+void loadModel() {
+    printf("Loading model\n");
 
+    // Read file
+    FILE* file = fopen(MESH_MODEL_PATH, "r");
+
+    // Buffer for line
+    char line[128];
+
+    // Get verticies and indicies count
+    u32 vertexCount = 0;
+    u32 uvCount = 0;
+    u32 indexCount = 0;
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char header[128];
+        sscanf(line, "%s", header);
+
+        if (strcmp(header, "v") == 0) {
+            vertexCount += 1;
+            continue;
+        }
+
+        if (strcmp(header, "vt") == 0) {
+            uvCount += 1;
+            continue;
+        }
+
+        // Indices (face)
+        if (strcmp(header, "f") == 0) {
+            indexCount += 3;
+            continue;
+        }
+    }
+
+    // Allocate memory for verticies
+    meshVertexCount = vertexCount;
+    meshVertices = malloc(sizeof(Vertex) * vertexCount);
+
+    // Allocate temp storage for UV coordinates
+    vec2* uvs = malloc(sizeof(vec2) * uvCount);
+
+    // Allocate memory for indices
+    meshIndexCount = indexCount;
+    meshIndices = malloc(sizeof(u32) * indexCount);
+
+
+    // Rewind file and start to populate data
+    rewind(file);
+    u32 currentVertexIndex = 0;
+    u32 currentUvIndex = 0;
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char header[128];
+        sscanf(line, "%s", header);
+        
+        // Vertex positional data
+        if (strcmp(header, "v") == 0) {
+            // Save positional data
+            sscanf(
+                line,
+                "%s %f %f %f\n",
+                header,
+                &meshVertices[currentVertexIndex].position[0],
+                &meshVertices[currentVertexIndex].position[1],
+                &meshVertices[currentVertexIndex].position[2]
+            );
+
+            meshVertices[currentVertexIndex].color[0] = 1.0f;
+            meshVertices[currentVertexIndex].color[1] = 1.0f;
+            meshVertices[currentVertexIndex].color[2] = 1.0f;
+
+            currentVertexIndex += 1;
+            continue;
+        }
+
+        // Vertex UV data
+        if (strcmp(header, "vt") == 0) {
+            // Save UV data
+            sscanf(
+                line,
+                "%s %f %f\n",
+                header,
+                &uvs[currentUvIndex][0],
+                &uvs[currentUvIndex][1]
+            );
+            currentUvIndex += 1;
+            continue;
+        }
+    }
+
+    // TEMP: Scale down verticies position
+    f32 scaleFactor = 0.01f;
+    for (u32 i = 0; i < meshVertexCount; i++) {
+        meshVertices[i].position[0] = meshVertices[i].position[0] * scaleFactor;
+        meshVertices[i].position[1] = meshVertices[i].position[1] * scaleFactor;
+        meshVertices[i].position[2] = meshVertices[i].position[2] * scaleFactor;
+    }
+
+    // Rewind file one more time and write indicies
+    rewind(file);
+    u32 currentIndex = 0;
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char header[128];
+        sscanf(line, "%s", header);
+        // Indices (face)
+        if (strcmp(header, "f") == 0) {
+            // Face info
+            i32 vertexIndex[3];
+            i32 uvIndex[3];
+            i32 normalIndex[3];
+
+            i32 matches = sscanf(
+                line,
+                "%s %d/%d/%d %d/%d/%d %d/%d/%d\n",
+                header,
+                &vertexIndex[0],
+                &uvIndex[0],
+                &normalIndex[0],
+                &vertexIndex[1],
+                &uvIndex[1],
+                &normalIndex[1],
+                &vertexIndex[2],
+                &uvIndex[2],
+                &normalIndex[2]
+            );
+
+            if (matches != 10) {
+                printf("[WARNING] To many face data provided\n");
+                continue;
+            }
+
+            // Fill index array
+            for (u32 i = 0; i < 3; i++) {
+                meshVertices[vertexIndex[i] - 1].uv[0] = uvs[uvIndex[i] - 1][0];
+                meshVertices[vertexIndex[i] - 1].uv[1] = 1.0f - uvs[uvIndex[i] - 1][1];
+                meshIndices[currentIndex + i] = vertexIndex[i] - 1;
+            }
+            currentIndex += 3;
+        }
+    }
+
+    free(uvs);
+
+    fclose(file);
+}
+
+void debugLoadedModel() {
+    printf("[MODEL] Indices: %d\n", meshIndexCount);
+    printf("[MODEL] Vertices: %d\n", meshVertexCount);
+
+    u32 debugIndexAmount = 12;
+    printf("[MODEL] Last %d indices:\n", debugIndexAmount);
+    for (u32 i = meshIndexCount - debugIndexAmount; i < meshIndexCount; i++) {
+        printf(" - %d\n", meshIndices[i]);
+    }
+
+    u32 debugVertexAmount = 12;
+    printf("[MODEL] Last %d vertices:\n", debugVertexAmount);
+    for (u32 i = meshVertexCount - debugVertexAmount; i < meshVertexCount; i++) {
+        Vertex* vert = &meshVertices[i];
+        printf(
+            " - #%d pos: (%f,%f,%f) | color: (%f,%f,%f) | uv: (%f,%f)\n",
+            i,
+            vert->position[0],
+            vert->position[1],
+            vert->position[2],
+            vert->color[0],
+            vert->color[1],
+            vert->color[2],
+            vert->uv[0],
+            vert->uv[1]
+        );
+    }
+
+}
 
 void createVertexBuffer() {
     printf("Creating vertex buffers\n");
 
-    VkDeviceSize bufferSize = sizeof(Vertex) * verticesCount;
+    VkDeviceSize bufferSize = sizeof(meshVertices[0]) * meshVertexCount;
 
     // Create staging (temp) buffer
     VkBuffer stagingBuffer;
@@ -1935,11 +2041,12 @@ void createVertexBuffer() {
         &stagingBufferMemory
     );
 
+
     // Map staging buffer memory into CPU accessible memory
     void* data;
     vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
     // Copy data into mapped area
-    memcpy(data, verticies, bufferSize);
+    memcpy(data, meshVertices, bufferSize);
     // Unmap memory
     vkUnmapMemory(logicalDevice, stagingBufferMemory);
     // TODO: Driver may actualy not copy data to buffer straight away, read about that
@@ -1966,7 +2073,7 @@ void createVertexBuffer() {
 void createIndexBuffer() {
     printf("Creating index buffer\n");
 
-    VkDeviceSize bufferSize = sizeof(indices[0]) * indicesCount;
+    VkDeviceSize bufferSize = sizeof(meshIndices[0]) * meshIndexCount;
 
     // Create temp buffer
     VkBuffer stagingBuffer;
@@ -1982,7 +2089,7 @@ void createIndexBuffer() {
     // Copy to temp buffer
     void* data;
     vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, indices, bufferSize);
+    memcpy(data, meshIndices, bufferSize);
     vkUnmapMemory(logicalDevice, stagingBufferMemory);
 
     // Create optimized storage buffer
@@ -2004,6 +2111,8 @@ void createIndexBuffer() {
 }
 
 void createUniformBuffers() {
+    printf("Creating uniform buffers\n");
+
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
     // Allocate memory for buffers and device memory handlers
@@ -2023,6 +2132,7 @@ void createUniformBuffers() {
 }
 
 void createDescriptorPool() {
+    printf("Creating descriptor pool\n");
 
     u32 poolSizeCount = 2;
     VkDescriptorPoolSize poolSizes[2] = {
@@ -2146,7 +2256,7 @@ void createCommandBuffers() {
             commandBuffers[i],
             
             // Vertex count
-            indicesCount,
+            meshIndexCount,
 
             // Instance count
             1,
@@ -2176,14 +2286,10 @@ void createSyncObjects() {
     printf("Creating semaphores\n");
 
     // Allocate memory for fences
-    inFlightFences = (VkFence*)malloc(
-        MAX_FRAMES_IN_FLIGHT * sizeof(VkFence)
-    );
+    inFlightFences = (VkFence*)malloc(MAX_FRAMES_IN_FLIGHT * sizeof(VkFence));
 
     // Automatically initialize images in flight with null handles
-    imagesInFlight = (VkFence*)malloc(
-        swapchainImageCount * sizeof(VkFence)
-    );
+    imagesInFlight = (VkFence*)malloc(swapchainImageCount * sizeof(VkFence));
 
     for (u32 i = 0; i < swapchainImageCount; i++) {
         imagesInFlight[i] = VK_NULL_HANDLE;
@@ -2398,7 +2504,6 @@ void recreateSwapchain() {
     createCommandBuffers();
 }
 
-
 void initVulkan() {
     printf("Initializing Vulkan\n");
     createInstance();
@@ -2417,6 +2522,8 @@ void initVulkan() {
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
+    loadModel();
+    debugLoadedModel();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -2485,20 +2592,38 @@ void shutdownVulkan() {
 }
 
 void updateUniformBuffer(u32 currentImage) {
-    UniformBufferObject ubo = {};
-    
+    UniformBufferObject ubo = {
+        .model = GLM_MAT4_IDENTITY_INIT,
+        .view = GLM_MAT4_IDENTITY_INIT,
+        .projection = GLM_MAT4_IDENTITY_INIT
+    };
 
-    f64 rotationAngleRads = 0.174533f;
-    mat4 modelMatrix = GLM_MAT4_IDENTITY_INIT;
-    glm_rotate_z(
-        modelMatrix,
-        glfwGetTime() * rotationAngleRads,
-        ubo.model
+    // Apply transform
+    vec3 translation = {0.0f, 0.7f, 0.0f};
+    glm_translate(ubo.model, translation);
+
+    // Pretrasform model
+    // TODO: This is not proper way of doing this
+    //       and usualy must be done before constructing UBO
+    vec3 preRotationPivot = {0.0f, -1.0f, 0.0f};
+    vec3 preRotationAxis = {0.55f, 0.0f, 1.0f};
+    glm_rotate_at(
+        ubo.model,
+        preRotationPivot,
+        0.0f,
+        preRotationAxis
     );
 
-    // vec3 eyeVector = {3.0f, 3.0f, 3.0f};
-    // vec3 lookCenter = {0.0f, 0.0f, 0.0f};
-    // vec3 lookUp = {0.0f, 0.0f, 1.0f};
+    f64 rotationAngleRads = 0.2;
+    vec3 rotationPivot = {0.0f, 0.0f, 0.0f};
+    vec3 rotationAxis = {0.0f, 1.0f, 0.0f};
+    glm_rotate_at(
+        ubo.model,
+        rotationPivot,
+        glfwGetTime() * rotationAngleRads,
+        rotationAxis
+    );
+
     glm_lookat(
         eyeVector,
         lookCenter,

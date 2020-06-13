@@ -15,6 +15,9 @@ add_executable(qq "src/main.c")
 # Add header include directory
 target_include_directories(qq PUBLIC "src/public")
 
+# Link glibc
+target_link_libraries(qq -static-libgcc)
+
 # Vulkan
 find_package(Vulkan REQUIRED)
 target_link_libraries(qq Vulkan::Vulkan)
