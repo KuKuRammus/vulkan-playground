@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0.0)
 
-# Declare project
+# Declare project (qq)
 project(qq VERSION 0.0.1 LANGUAGES C)
 
 # Binary output path
