@@ -118,6 +118,14 @@ VkDeviceMemory* uniformBuffersMemory;
 // Command buffers
 VkCommandBuffer* commandBuffers;
 
+// Amount of samples per pixel
+VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+
+// Storage for desired amount of samples
+VkImage colorImage;
+VkDeviceMemory colorImageMemory;
+VkImageView colorImageView;
+
 // Loaded image handle and memory
 u32 mipLevels = 0; // Amount of mip levels
 VkImage textureImage;
@@ -164,6 +172,27 @@ VkBuffer meshVertexBuffer;
 VkDeviceMemory meshVertexBufferMemory;
 
 // ------ END GLOBALS
+
+
+// Determines max amount of samples per pixel
+VkSampleCountFlagBits getMaxUsableSampleCount() {
+    VkPhysicalDeviceProperties physicalDeviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+
+    VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts
+        & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+
+    if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+    if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+    if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+    if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+    if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+    if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+
+    // No sampling supported
+    return VK_SAMPLE_COUNT_1_BIT;
+}
 
 // ------ VERTEX HELPERS
 // All functions below are related to Vertex struct (ideally, methods in the class)
@@ -376,6 +405,7 @@ void createImage(
     u32 width,
     u32 height,
     u32 mLevels,
+    VkSampleCountFlagBits numSamples,
     VkFormat format,
     VkImageTiling tiling,
     VkImageUsageFlags usage,
@@ -411,7 +441,7 @@ void createImage(
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 
         // Not using multisampling for now
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .samples = numSamples,
         .flags = 0
     };
 
@@ -898,6 +928,9 @@ void pickPhysicalDevice() {
         if (score > physicalDeviceRating) {
             physicalDevice = devices[i];
             physicalDeviceRating = score;
+
+            // Use max amount of multisampling
+            msaaSamples = getMaxUsableSampleCount();
         }
    }
 
@@ -1301,7 +1334,7 @@ void createGraphicsPipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .sampleShadingEnable = VK_FALSE,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .rasterizationSamples = msaaSamples,
         .minSampleShading = 1.0f,
         .pSampleMask = NULL,
         .alphaToCoverageEnable = VK_FALSE,
@@ -1436,7 +1469,7 @@ void createRenderPass() {
     // Create depth attachment
     VkAttachmentDescription depthAttachment = {
         .format = findDepthFormat(),
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .samples = msaaSamples,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -1449,10 +1482,27 @@ void createRenderPass() {
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
 
+    // Multisampled images cannot be presented directly
+    // First, you need to resolve them to a regular image
+    VkAttachmentDescription colorAttachmentResolve = {
+        .format = swapchainImageFormat,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    };
+    VkAttachmentReference colorAttachmentResolveRef = {
+        .attachment = 2,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
     // Create color attachment to store color information
     VkAttachmentDescription colorAttachment = {
         .format = swapchainImageFormat,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .samples = msaaSamples,
 
         // Clear values at the start
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -1468,7 +1518,7 @@ void createRenderPass() {
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 
         // Keep present in the chain
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+        .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
     // Create color pass reference for subpass
@@ -1487,6 +1537,9 @@ void createRenderPass() {
         // Specify reference(-s) and links
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachmentRef,
+
+        // Image resolvers
+        .pResolveAttachments = &colorAttachmentResolveRef,
 
         // Depth attachments
         .pDepthStencilAttachment = &depthAttachmentRef
@@ -1508,10 +1561,11 @@ void createRenderPass() {
     };
 
     // Create render pass
-    u32 attachmentCount = 2;
-    VkAttachmentDescription attachments[2] = {
+    u32 attachmentCount = 3;
+    VkAttachmentDescription attachments[3] = {
         colorAttachment,
-        depthAttachment
+        depthAttachment,
+        colorAttachmentResolve
     };
     VkRenderPassCreateInfo renderPassInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -1550,10 +1604,11 @@ void createFramebuffers() {
 
     // Create framebuffers for each swap chain image
     for (u32 i = 0; i < swapchainImageCount; i++) {
-        u32 attachmentCount = 2;
-        VkImageView attachments[2] = {
-            swapchainImageViews[i],
-            depthImageView
+        u32 attachmentCount = 3;
+        VkImageView attachments[3] = {
+            colorImageView,
+            depthImageView,
+            swapchainImageViews[i]
         };
 
         // Create framebuffer
@@ -1655,6 +1710,24 @@ void transitionImageLayout(
     endSingleTimeCommands(commandBuffer);
 }
 
+void createColorResources() {
+    VkFormat colorFormat = swapchainImageFormat;
+
+    createImage(
+        swapchainExtent.width,
+        swapchainExtent.height,
+        1,
+        msaaSamples,
+        colorFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &colorImage,
+        &colorImageMemory
+    );
+    colorImageView = createImageView(colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+}
+
 void createDepthResources() {
     printf("Creationg depth resources\n");
 
@@ -1664,6 +1737,7 @@ void createDepthResources() {
         swapchainExtent.width,
         swapchainExtent.height,
         1,
+        msaaSamples,
         depthFormat,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -1894,6 +1968,7 @@ void createTextureImage() {
         textureWidth,
         textureHeight,
         mipLevels,
+        VK_SAMPLE_COUNT_1_BIT,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT
@@ -2584,6 +2659,11 @@ void createDescriptorSets() {
 }
 
 void shutdownSwapchain() {
+    printf("Shutting down color resources\n");
+    vkDestroyImageView(logicalDevice, colorImageView, NULL);
+    vkDestroyImage(logicalDevice, colorImage, NULL);
+    vkFreeMemory(logicalDevice, colorImageMemory, NULL);
+
     printf("Shutting down depth images\n");
     vkDestroyImageView(logicalDevice, depthImageView, NULL);
     vkDestroyImage(logicalDevice, depthImage, NULL);
@@ -2658,6 +2738,7 @@ void recreateSwapchain() {
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createColorResources();
     createDepthResources();
     createFramebuffers();
     createUniformBuffers();
@@ -2679,6 +2760,7 @@ void initVulkan() {
     createDescriptorSetLayout();
     createGraphicsPipeline();
     createCommandPool();
+    createColorResources();
     createDepthResources();
     createFramebuffers();
     createTextureImage();
